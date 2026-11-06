@@ -14,6 +14,8 @@
     seq: 0,
     live: null, // EventSource
     liveConnected: false,
+    polling: false, // fallback when the SSE stream is unavailable (serverless hosts)
+    pollTimer: null,
     modalId: null,
     modalTimer: null,
   };
@@ -360,14 +362,20 @@
   }
 
   // ---------- live updates (Server-Sent Events) ----------
-  function setLive(on) {
+  function setLive(on, mode = 'push') {
     state.liveConnected = on;
     el.livedot.classList.toggle('hidden', !on);
+    el.livedot.title = mode === 'poll'
+      ? 'Live updates via polling: scores and clocks refresh every 7 seconds'
+      : 'Live updates connected: scores and clocks are pushed within seconds';
   }
+
+  const liveKey = (g) => JSON.stringify([g.status, g.home.score, g.home.winner, g.home.record, g.away.score, g.away.winner, g.away.record]);
 
   function applyLive(u) {
     const g = state.games.get(u.id);
     if (!g) return; // not on the day being viewed
+    if (liveKey(u) === liveKey(g)) return; // nothing changed (polling returns every live game)
     g.status = u.status;
     Object.assign(g.home, u.home);
     Object.assign(g.away, u.away);
@@ -393,12 +401,56 @@
     el.updated.textContent = `Updated ${timeFmt.format(new Date())}`;
   }
 
+  // Polling fallback: used when the server cannot hold an SSE stream open
+  // (serverless hosts such as Vercel), when EventSource is missing, or when
+  // the URL carries ?live=poll. Each tick fetches the live fields of every
+  // in-progress game for the viewed date; applyLive ignores unchanged ones.
+  function startPolling() {
+    if (state.polling) return;
+    state.polling = true;
+    if (state.live) {
+      state.live.close();
+      state.live = null;
+    }
+    setLive(true, 'poll');
+    scheduleRefresh();
+    const tick = async () => {
+      try {
+        const res = await fetch(`/api/live-poll?date=${state.date}`);
+        if (res.ok) {
+          const j = await res.json();
+          for (const u of j.games || []) applyLive(u);
+        }
+      } catch {
+        /* transient; try again next tick */
+      }
+      state.pollTimer = setTimeout(tick, 7_000);
+    };
+    tick();
+  }
+
   function connectLive() {
-    if (state.live || !('EventSource' in window)) return;
+    if (state.live || state.polling) return;
+    const forcePoll = new URLSearchParams(location.search).get('live') === 'poll';
+    if (forcePoll || !('EventSource' in window)) return startPolling();
     const es = new EventSource('/api/live');
     state.live = es;
+    let gotHello = false;
+    const fallback = () => {
+      clearTimeout(giveUp);
+      es.close();
+      state.live = null;
+      startPolling();
+    };
+    // No greeting within 4 s (404 from a serverless host, proxy buffering, ...)
+    // means the stream is not going to work: switch to polling.
+    const giveUp = setTimeout(() => {
+      if (!gotHello) fallback();
+    }, 4_000);
     es.addEventListener('hello', () => {
-      setLive(true);
+      gotHello = true;
+      clearTimeout(giveUp);
+      setLive(true, 'push');
       scheduleRefresh();
     });
     es.addEventListener('game', (e) => {
@@ -409,7 +461,8 @@
       }
     });
     es.onerror = () => {
-      // The browser reconnects on its own; poll faster until it does.
+      if (!gotHello) return fallback();
+      // The browser reconnects on its own; poll the day faster until it does.
       if (state.liveConnected) {
         setLive(false);
         scheduleRefresh();

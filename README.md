@@ -82,7 +82,35 @@ public/            index.html, styles.css, app.js (vanilla JS)
 ```
 
 API routes: `/api/day?date=YYYYMMDD`, `/api/game/{nfl|nba|soccer}/{league}/{id}`,
-`/api/nfl/rankings`, `/api/health`.
+`/api/nfl/rankings`, `/api/live` (SSE stream), `/api/live-poll?date=YYYYMMDD`
+(live fields of in-progress games, for hosts without streaming), `/api/health`.
+`api/index.js` is the Vercel entry point and `vercel.json` the deployment config.
+
+## Deploy to Vercel
+
+The repo is ready to import as-is: `vercel.json` sets the "Other" preset with
+`public/` as the static output and routes every `/api/*` request to one
+serverless function (`api/index.js`), which reuses the same request handler
+as the local server. No build step and no environment variables are needed.
+
+1. Import the GitHub repo in the Vercel dashboard (or run `vercel`).
+2. Leave the Build Command empty and the Output Directory as detected.
+3. Deploy.
+
+What differs from running locally:
+
+- **Live updates use polling instead of push.** A serverless function cannot
+  keep a Server-Sent Events stream open, so `/api/live` answers 404 there and
+  the page falls back on its own to `/api/live-poll` every 7 seconds (the LIVE
+  badge says "via polling"). You can force this mode locally with `?live=poll`.
+- **Cold starts.** Each new function instance starts with an empty memory
+  cache. The first request for a day view takes a couple of seconds, and the
+  first NFL game detail builds the pass/rush rankings from every completed game
+  (a few seconds with an empty cache; `maxDuration` is set to 60 s).
+- **Disk cache lives in `/tmp`.** Geocoding results, NFL game extracts and
+  other disk caches go to the OS temp dir when the project directory is not
+  writable (`lib/cache.js` tries `CACHE_DIR`, then `.cache`, then the temp
+  dir). Set `CACHE_DIR` to override the location anywhere.
 
 ## Known limits
 

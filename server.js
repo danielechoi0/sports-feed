@@ -3,7 +3,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   SOCCER_LEAGUES,
   SPORT_PATH,
@@ -29,6 +29,8 @@ import { cached, pLimit, cacheStats } from './lib/cache.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const PORT = Number(process.env.PORT) || 3000;
+// Vercel sets VERCEL=1 inside functions; there a stream cannot stay open.
+const SERVERLESS = !!process.env.VERCEL;
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -159,17 +161,24 @@ function needsWatching(g, now) {
   return kickoff - now < 2 * 60_000; // starts within two minutes, or should have started
 }
 
-async function livePoll() {
-  const date = todayET();
+const leagueKey = (g) => (g.sport === 'soccer' ? `soccer:${g.league.slug}` : g.sport);
+
+// Refresh the live fields of every league with a game in progress on `date`.
+// Changed games are patched into the cached day and pushed to SSE clients.
+// Returns the live fields of all games currently worth watching (empty when
+// nothing is live), which is what the polling endpoint serves on platforms
+// that cannot hold a stream open.
+async function refreshLive(date = todayET()) {
   let day = latestDays.get(date);
   if (!day) day = await cached(`day:${date}`, 45_000, () => buildDay(date));
   const now = Date.now();
   const watched = new Set();
-  for (const g of allGames(day)) if (needsWatching(g, now)) watched.add(g.sport === 'soccer' ? `soccer:${g.league.slug}` : g.sport);
-  if (!watched.size) return false;
+  for (const g of allGames(day)) if (needsWatching(g, now)) watched.add(leagueKey(g));
+  if (!watched.size) return [];
 
-  const jobs = LEAGUE_JOBS.filter((j) => watched.has(j.sport === 'soccer' ? `soccer:${j.league.slug}` : j.sport));
+  const jobs = LEAGUE_JOBS.filter((j) => watched.has(leagueKey(j)));
   const byId = new Map(allGames(day).map((g) => [g.id, g]));
+  const live = [];
   await Promise.all(
     jobs.map(async (j) => {
       try {
@@ -177,6 +186,7 @@ async function livePoll() {
         for (const ev of sb.events || []) {
           const fresh = normalizeEvent(ev, j.sport, j.league);
           const fields = liveFields(fresh);
+          if (needsWatching(fresh, now)) live.push(fields);
           const key = JSON.stringify(fields);
           if (liveSnapshot.get(fresh.id) === key) continue;
           liveSnapshot.set(fresh.id, key);
@@ -192,7 +202,11 @@ async function livePoll() {
       }
     }),
   );
-  return true;
+  return live;
+}
+
+async function livePoll() {
+  return (await refreshLive()).length > 0;
 }
 
 function startLiveLoop() {
@@ -359,7 +373,7 @@ async function serveStatic(req, res, pathname) {
   }
 }
 
-async function handle(req, res) {
+export async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const { pathname } = url;
   if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' });
@@ -377,7 +391,19 @@ async function handle(req, res) {
     return sendJson(res, 200, await getRankings());
   }
   if (pathname === '/api/live') {
+    if (SERVERLESS) {
+      return sendJson(res, 404, {
+        error: 'Server-Sent Events are not available on serverless deployments.',
+        hint: 'Poll /api/live-poll?date=YYYYMMDD instead; the page does this automatically.',
+      });
+    }
     return handleSse(req, res);
+  }
+  if (pathname === '/api/live-poll') {
+    const date = url.searchParams.get('date') || todayET();
+    if (!/^\d{8}$/.test(date)) return sendJson(res, 400, { error: 'date must be YYYYMMDD' });
+    const games = await cached(`livepoll:${date}`, 3_000, () => refreshLive(date));
+    return sendJson(res, 200, { date, time: new Date().toISOString(), games });
   }
   const m = pathname.match(/^\/api\/game\/(nfl|nba|soccer)\/([a-z0-9.]+)\/(\d+)$/);
   if (m) {
@@ -393,21 +419,30 @@ async function handle(req, res) {
   return serveStatic(req, res, pathname);
 }
 
-const server = http.createServer((req, res) => {
+// Request entry point shared by the local server and the Vercel function
+// (api/index.js): routes, error handling and request logging.
+export async function serve(req, res) {
   const started = Date.now();
-  handle(req, res)
-    .catch((e) => {
-      console.error(`${req.method} ${req.url} failed:`, e);
-      if (!res.headersSent) sendJson(res, 500, { error: e.message || 'internal error' });
-      else res.end();
-    })
-    .finally(() => {
-      if (req.url.startsWith('/api/')) console.log(`${req.method} ${req.url} ${res.statusCode} ${Date.now() - started}ms`);
-    });
-});
+  try {
+    await handle(req, res);
+  } catch (e) {
+    console.error(`${req.method} ${req.url} failed:`, e);
+    if (!res.headersSent) sendJson(res, 500, { error: e.message || 'internal error' });
+    else res.end();
+  } finally {
+    if (req.url.startsWith('/api/')) console.log(`${req.method} ${req.url} ${res.statusCode} ${Date.now() - started}ms`);
+  }
+}
 
-server.listen(PORT, () => {
-  console.log(`Sports dashboard running at http://localhost:${PORT}`);
-  warmRankings();
-  startLiveLoop();
-});
+// Only run the long-lived server when this file is the entry script. When
+// imported (by the Vercel function) nothing is started: no listener, no
+// background live loop, no eager NFL rankings build.
+const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isMain) {
+  const server = http.createServer(serve);
+  server.listen(PORT, () => {
+    console.log(`Sports dashboard running at http://localhost:${PORT}`);
+    warmRankings();
+    startLiveLoop();
+  });
+}
