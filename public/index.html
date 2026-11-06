@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Game Day</title>
+  <meta name="description" content="Today's NFL, NBA and European soccer fixtures with form, weather, lineups and injuries." />
+  <meta name="color-scheme" content="light dark" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%2322c55e'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>Game Day</h1>
+      <span id="daylabel" class="daylabel"></span>
+    </div>
+    <nav class="datenav" aria-label="Date">
+      <button id="prev" class="btn icon" title="Previous day" aria-label="Previous day">&#8249;</button>
+      <button id="today" class="btn">Today</button>
+      <button id="next" class="btn icon" title="Next day" aria-label="Next day">&#8250;</button>
+      <input id="datepick" type="date" class="datepick" aria-label="Pick a date" />
+    </nav>
+    <div class="meta">
+      <span id="livedot" class="livedot hidden" title="Live updates connected: scores and clocks are pushed within seconds">LIVE</span>
+      <span id="updated" class="updated"></span>
+      <button id="refresh" class="btn" title="Refresh now">Refresh</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner hidden"></div>
+
+  <main id="main">
+    <section class="sport" id="sec-nfl">
+      <div class="sport-head"><h2>NFL</h2><span class="count" data-count></span></div>
+      <div class="grid" data-grid></div>
+    </section>
+    <section class="sport" id="sec-nba">
+      <div class="sport-head"><h2>NBA</h2><span class="count" data-count></span></div>
+      <div class="grid" data-grid></div>
+    </section>
+    <section class="sport" id="sec-soccer">
+      <div class="sport-head">
+        <h2>Soccer</h2><span class="count" data-count></span>
+        <div class="filters" id="league-filters" aria-label="Filter leagues"></div>
+      </div>
+      <div class="grid" data-grid></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Scores, fixtures, lineups and injuries from ESPN. Weather from Open-Meteo at kickoff. Times shown in your local timezone.
+  </footer>
+
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-card">
+      <button class="modal-close btn icon" data-close aria-label="Close">&times;</button>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
