@@ -1,4 +1,4 @@
-/* Game Day dashboard – vanilla JS frontend */
+/* Game Day dashboard – vanilla JS frontend (Timeline × Scoreboard layout) */
 (() => {
   'use strict';
 
@@ -9,6 +9,7 @@
     data: null,
     games: new Map(),
     hiddenLeagues: new Set(load('hiddenLeagues', [])),
+    sportTab: load('sportTab', 'all'),
     timer: null,
     seq: 0,
     live: null, // EventSource
@@ -16,6 +17,7 @@
     modalId: null,
     modalTimer: null,
   };
+  if (!['all', 'nfl', 'nba', 'soccer'].includes(state.sportTab)) state.sportTab = 'all';
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const el = {
@@ -23,14 +25,12 @@
     updated: $('#updated'),
     banner: $('#banner'),
     datepick: $('#datepick'),
+    tabs: $('#sport-tabs'),
     filters: $('#league-filters'),
+    groups: $('#groups'),
     modal: $('#modal'),
     modalBody: $('#modal-body'),
-    sections: {
-      nfl: $('#sec-nfl'),
-      nba: $('#sec-nba'),
-      soccer: $('#sec-soccer'),
-    },
+    livedot: $('#livedot'),
   };
 
   // ---------- helpers ----------
@@ -68,6 +68,7 @@
   const fmtTime = (iso) => timeFmt.format(new Date(iso));
   const fmtShort = (iso) => shortDateFmt.format(new Date(iso));
   const deg = (t) => (t == null ? '--' : `${Math.round(t)}°`);
+  const SPORT_ORDER = { nfl: 0, nba: 1, soccer: 2 };
 
   function img(src, alt, cls = '') {
     return src
@@ -75,78 +76,88 @@
       : `<span class="${cls}" style="display:inline-block;width:30px;height:30px"></span>`;
   }
 
-  // ---------- weather icons ----------
+  // Team badge: ESPN logo with a colored-square + abbreviation fallback when the image fails.
+  function badge(team, size) {
+    const color = team.color ? `#${String(team.color).replace('#', '')}` : '#5a6270';
+    const image = team.logo ? `<img src="${esc(team.logo)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+    return `<span class="badge ${size}" style="--tc:${esc(color)}" aria-hidden="true"><span class="abbr">${esc(team.abbrev || '')}</span>${image}</span>`;
+  }
+
+  // ---------- weather icons (currentColor strokes) ----------
+  const CLOUD = '<path d="M7 18h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 18z"/>';
+  const CLOUD_HI = '<path d="M7 15h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 15z"/>';
   const ICON = {
-    sun: '<circle cx="12" cy="12" r="4.2" fill="#f59e0b"/><g stroke="#f59e0b" stroke-width="1.8" stroke-linecap="round"><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></g>',
-    'cloud-sun': '<circle cx="9" cy="9" r="3.4" fill="#f59e0b"/><g stroke="#f59e0b" stroke-width="1.5" stroke-linecap="round"><path d="M9 2.8v1.6M2.8 9h1.6M4.6 4.6l1.1 1.1M13.4 4.6l-1.1 1.1"/></g><path d="M8.5 20h9a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.6-1.3A4.2 4.2 0 0 0 8.5 20z" fill="#9ca3af"/>',
-    cloud: '<path d="M7 19h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 19z" fill="#9ca3af"/>',
-    fog: '<path d="M7 15h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 15z" fill="#9ca3af"/><g stroke="#9ca3af" stroke-width="1.8" stroke-linecap="round"><path d="M5 18h14M7 21h10"/></g>',
-    drizzle: '<path d="M7 15h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 15z" fill="#9ca3af"/><g stroke="#60a5fa" stroke-width="1.8" stroke-linecap="round"><path d="M9 18v2M13 18v2M17 18v2"/></g>',
-    rain: '<path d="M7 14h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 14z" fill="#9ca3af"/><g stroke="#3b82f6" stroke-width="1.8" stroke-linecap="round"><path d="M8 17l-1 4M12 17l-1 4M16 17l-1 4"/></g>',
-    snow: '<path d="M7 14h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 14z" fill="#9ca3af"/><g fill="#93c5fd"><circle cx="8.5" cy="18" r="1.3"/><circle cx="12.5" cy="20.5" r="1.3"/><circle cx="16.5" cy="18" r="1.3"/></g>',
-    storm: '<path d="M7 14h10.5a4 4 0 0 0 .4-8 5.5 5.5 0 0 0-10.6-1.4A4.7 4.7 0 0 0 7 14z" fill="#6b7280"/><path d="M13 13l-3 5h2.5l-1 4 3.5-5.5H12.5z" fill="#fbbf24"/>',
-    thermo: '<path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0z" fill="none" stroke="#9ca3af" stroke-width="1.8"/><circle cx="12" cy="17" r="2" fill="#ef4444"/>',
-    indoor: '<path d="M4 11l8-6 8 6v9H4z" fill="none" stroke="#9ca3af" stroke-width="1.8" stroke-linejoin="round"/><path d="M10 20v-5h4v5" fill="none" stroke="#9ca3af" stroke-width="1.8"/>',
-    wind: '<g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 8h11a2.5 2.5 0 1 0-2.5-2.5M3 12h15a2.5 2.5 0 1 1-2.5 2.5M3 16h9a2 2 0 1 1-2 2"/></g>',
-    drop: '<path d="M12 3s-6 7-6 11a6 6 0 0 0 12 0c0-4-6-11-6-11z" fill="none" stroke="currentColor" stroke-width="1.8"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/>',
+    'cloud-sun': '<circle cx="8" cy="8" r="2.8"/><path d="M8 2.5v1.5M2.5 8H4M4.1 4.1l1 1M11.9 4.1l-1 1"/><path d="M9.5 20h8a3.5 3.5 0 0 0 .4-7 5 5 0 0 0-9.6-1.3A4.2 4.2 0 0 0 9.5 20z"/>',
+    cloud: CLOUD,
+    fog: CLOUD_HI + '<path d="M5 18.5h14M7 21.5h10"/>',
+    drizzle: CLOUD_HI + '<path d="M9 18v2.5M13 18v2.5M17 18v2.5"/>',
+    rain: CLOUD_HI + '<path d="M8.5 18l-1 3.5M12.5 18l-1 3.5M16.5 18l-1 3.5"/>',
+    snow: CLOUD_HI + '<circle cx="8.5" cy="19" r="1"/><circle cx="12.5" cy="21" r="1"/><circle cx="16.5" cy="19" r="1"/>',
+    storm: CLOUD_HI + '<path d="M13 14l-2.5 4h3l-1.5 4"/>',
+    thermo: '<path d="M10 4a2 2 0 0 1 4 0v9.3a4 4 0 1 1-4 0z"/><circle cx="12" cy="17" r="1.6"/>',
+    indoor: '<path d="M4 11l8-6 8 6v9H4z"/><path d="M10 20v-5h4v5"/>',
   };
-  const svg = (name, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICON[name] || ICON.thermo}</svg>`;
+  const svg = (name, label = '') =>
+    `<svg class="wxicon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" ${label ? `role="img" aria-label="${esc(label)}"` : 'aria-hidden="true"'}>${ICON[name] || ICON.thermo}</svg>`;
 
-  function wxChip(w) {
-    if (!w) return '';
-    if (w.indoor) return `<span class="wx" title="Indoor venue">${svg('indoor')} Indoors</span>`;
-    const bits = [deg(w.tempF)];
-    if (w.precipProb != null) bits.push(`${w.precipProb}% rain`);
-    if (w.windMph != null) bits.push(`${Math.round(w.windMph)} mph`);
-    return `<span class="wx" title="${esc(w.label || '')}${w.place ? ' · ' + esc(w.place) : ''}">${svg(w.icon)} ${bits.join(' · ')}</span>`;
+  // ---------- status helpers ----------
+  const IRREGULAR = /postponed|cancel|delay|suspend|tbd/i;
+  function isIrregular(g) {
+    return IRREGULAR.test(g.status.description || '') || IRREGULAR.test(g.status.detail || '');
   }
-
-  function wxPanel(w) {
-    if (!w) return `<aside class="wx-panel">${svg('thermo')}<div class="lbl">No forecast</div></aside>`;
-    if (w.indoor) return `<aside class="wx-panel">${svg('indoor')}<div class="lbl">Indoors</div><div class="sub">Dome / roof</div></aside>`;
-    const sub = [];
-    if (w.windMph != null) sub.push(`${Math.round(w.windMph)} mph wind`);
-    if (w.precipProb != null) sub.push(`${w.precipProb}% precip`);
-    return `<aside class="wx-panel" title="${esc(w.place || '')}">${svg(w.icon)}<div class="temp">${deg(w.tempF)}</div><div class="lbl">${esc(w.label || '')}</div><div class="sub">${sub.join(' · ')}</div></aside>`;
+  function groupOf(g) {
+    if (isIrregular(g) && g.status.state !== 'in') return 'upcoming';
+    if (g.status.state === 'in') return 'live';
+    if (g.status.state === 'post') return 'final';
+    return 'upcoming';
   }
-
-  // ---------- status ----------
+  // Short live clock text: "58'", "HT", "Q2 8:42", "HALF", "END Q1", "OT 2:10".
+  function liveClock(g) {
+    const s = g.status;
+    if (g.sport === 'soccer') {
+      const named = s.shortDetail && !/\d/.test(s.shortDetail) ? s.shortDetail : null;
+      return named || s.clock || s.shortDetail || 'LIVE';
+    }
+    if (/halftime/i.test(s.description || '')) return 'HALF';
+    if (/end of/i.test(s.description || '') && s.period) return `END Q${s.period}`;
+    if (s.period && s.clock) {
+      const p = s.period > 4 ? (s.period === 5 ? 'OT' : `${s.period - 4}OT`) : `Q${s.period}`;
+      return `${p} ${s.clock}`;
+    }
+    return s.shortDetail || s.detail || 'LIVE';
+  }
+  function finalText(g) {
+    return g.sport === 'soccer' ? g.status.shortDetail || 'FT' : 'Final';
+  }
   function statusHtml(g) {
     const s = g.status;
-    if (s.state === 'in') {
-      // Soccer: show the running clock, except for named breaks (HT, ET, Pens).
-      const named = s.shortDetail && !/\d/.test(s.shortDetail) ? s.shortDetail : null;
-      const txt = g.sport === 'soccer' ? named || s.clock || s.shortDetail || 'Live' : s.shortDetail || s.detail || 'Live';
-      return `<span class="status live">${esc(txt)}</span>`;
-    }
-    if (s.state === 'post') {
-      const txt = g.sport === 'soccer' ? s.shortDetail || 'FT' : s.shortDetail || 'Final';
-      return `<span class="status">${esc(txt)}</span>`;
-    }
-    const txt = s.description && /postponed|cancel|delay|tbd/i.test(s.description) ? s.description : fmtTime(g.date);
+    if (s.state === 'in') return `<span class="status live"><span class="dot" aria-hidden="true"></span>${esc(liveClock(g))}</span>`;
+    if (s.state === 'post') return `<span class="status">${esc(finalText(g))}</span>`;
+    const txt = isIrregular(g) ? s.description : fmtTime(g.date);
     return `<span class="status">${esc(txt)}</span>`;
   }
-
-  function scoreCell(g, team) {
-    if (g.status.state === 'pre') return `<div class="score dim">${esc(team.record || '')}</div>`;
-    return `<div class="score">${esc(team.score ?? '')}</div>`;
+  function teamsInOrder(g) {
+    return g.sport === 'soccer' ? [g.home, g.away] : [g.away, g.home];
   }
-
-  function teamRow(g, team, opts = {}) {
-    const isWinner = g.status.state === 'post' && team.winner;
-    const isLoser = g.status.state === 'post' && !team.winner && g.home.score !== g.away.score;
-    const tag = `<span class="tag ${team.homeAway === 'home' ? 'home' : ''}">${team.homeAway === 'home' ? 'HOME' : 'AWAY'}</span>`;
-    const rec = g.status.state === 'pre' ? '' : `<div class="rec">${esc(team.record || '')}</div>`;
-    return `<div class="team ${isWinner ? 'winner' : ''} ${isLoser ? 'loser' : ''}">
-      ${img(team.logo, team.name)}
-      <div class="tname"><div class="n"><span class="nm">${esc(opts.short ? team.shortName : team.name)}</span>${tag}</div>${rec}</div>
-      ${opts.form ? formHtml(team.last5) : '<span></span>'}
-      ${scoreCell(g, team)}
-    </div>`;
+  function isLoser(g, team) {
+    if (g.status.state !== 'post') return false;
+    const a = Number(g.home.score);
+    const b = Number(g.away.score);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a === b) return false;
+    return team.homeAway === 'home' ? a < b : b < a;
+  }
+  function accessibleName(g) {
+    const [x, y] = teamsInOrder(g);
+    const sep = g.sport === 'soccer' ? 'vs' : 'at';
+    const grp = groupOf(g);
+    const score = grp === 'upcoming' ? '' : `, ${x.score ?? 0} to ${y.score ?? 0}`;
+    const st = grp === 'live' ? ', live' : grp === 'final' ? ', final' : `, ${isIrregular(g) ? g.status.description : fmtTime(g.date)}`;
+    return `${x.shortName} ${sep} ${y.shortName}${st}${score}`;
   }
 
   function formHtml(last5) {
-    if (!last5 || !last5.length) return '<div class="form"></div>';
+    if (!last5 || !last5.length) return '';
     const chips = last5
       .map((r) => {
         const res = (r.result || '-').toUpperCase();
@@ -157,73 +168,147 @@
         return `<span class="f f-${esc(res)}" title="${esc(title)}">${esc(res)}</span>`;
       })
       .join('');
-    return `<div class="form" title="Last 5, oldest to newest">${chips}</div>`;
+    return `<span class="form" title="Last 5, oldest to newest">${chips}</span>`;
   }
 
-  // ---------- cards ----------
   function venueText(g) {
-    const v = g.venue;
-    return [v.name, v.city].filter(Boolean).join(' · ');
+    return [g.venue.name, g.venue.city].filter(Boolean).join(' · ');
   }
+  function metaLine(g) {
+    const bits = [`<span class="chip">${esc(g.league.short || g.league.name)}</span>`];
+    if (g.broadcast) bits.push(`<span>${esc(g.broadcast)}</span>`);
+    if (g.odds && g.sport !== 'soccer') bits.push(`<span class="spread">${esc(g.odds)}</span>`);
+    return bits.join('');
+  }
+  const tagHtml = (t) => `<span class="tag ${t.homeAway === 'home' ? 'home' : ''}">${t.homeAway === 'home' ? 'HOME' : 'AWAY'}</span>`;
 
-  function cardSoccer(g) {
-    return `<article class="card soccer ${g.status.state === 'in' ? 'live' : ''}" data-id="${esc(g.id)}" tabindex="0" role="button">
-      <div class="card-top"><span class="chip">${esc(g.league.short || g.league.name)}</span>${g.broadcast ? `<span>${esc(g.broadcast)}</span>` : ''}${statusHtml(g)}</div>
-      <div class="teams">${teamRow(g, g.home, { form: true, short: true })}${teamRow(g, g.away, { form: true, short: true })}</div>
-      <div class="card-foot"><span class="venue">${esc(venueText(g))}</span>${wxChip(g.weather)}</div>
+  // ---------- live card ----------
+  function liveCard(g) {
+    const teams = teamsInOrder(g);
+    const rows = teams
+      .map((t) => `<div class="trow">${badge(t, 'lg')}<span class="tname">${esc(t.shortName)}</span>${tagHtml(t)}</div>`)
+      .join('');
+    const scores = teams.map((t) => `<div class="s">${esc(t.score ?? 0)}</div>`).join('');
+    let wx = '';
+    if (g.sport !== 'nba' && g.weather) {
+      wx = g.weather.indoor
+        ? `<span class="wx">${svg('indoor', 'Indoors')} Indoors</span>`
+        : `<span class="wx">${svg(g.weather.icon, g.weather.label || 'Weather')} ${deg(g.weather.tempF)}${g.weather.precipProb != null ? ` · ${g.weather.precipProb}%` : ''}</span>`;
+    }
+    return `<article class="live-card" data-id="${esc(g.id)}" tabindex="0" role="button" aria-label="${esc(accessibleName(g))}">
+      <div class="meta">${metaLine(g)}</div>
+      <div class="body"><div class="teams">${rows}</div>
+        <div class="tile">${scores}<div class="clock"><span class="dot" aria-hidden="true"></span>${esc(liveClock(g))}</div></div></div>
+      <div class="foot"><span class="venue">${esc(venueText(g))}</span>${wx}</div>
     </article>`;
   }
 
-  function cardNfl(g) {
-    return `<article class="card nfl ${g.status.state === 'in' ? 'live' : ''}" data-id="${esc(g.id)}" tabindex="0" role="button">
-      <div class="main">
-        <div class="card-top"><span class="chip">NFL</span>${g.broadcast ? `<span>${esc(g.broadcast)}</span>` : ''}${g.odds ? `<span>${esc(g.odds)}</span>` : ''}${statusHtml(g)}</div>
-        <div class="teams">${teamRow(g, g.away, { short: true })}${teamRow(g, g.home, { short: true })}</div>
-        <div class="card-foot"><span class="venue">${esc(venueText(g))}</span></div>
-      </div>
-      ${wxPanel(g.weather)}
-    </article>`;
+  // ---------- rail row ----------
+  function weatherPanelHtml(g) {
+    if (g.sport === 'nba') return '';
+    const w = g.weather;
+    if (!w) return `<aside class="wxp">${svg('thermo', 'No forecast')}<div class="cond">No forecast</div></aside>`;
+    if (w.indoor) return `<aside class="wxp">${svg('indoor', 'Indoors')}<div class="cond">Indoors</div><div class="sub">Dome or roof</div></aside>`;
+    const sub = [w.windMph != null ? `${Math.round(w.windMph)} mph` : null, w.precipProb != null ? `${w.precipProb}%` : null].filter(Boolean).join(' · ');
+    return `<aside class="wxp" title="${esc(w.place || '')}">${svg(w.icon, w.label || 'Weather')}<div class="temp">${deg(w.tempF)}</div><div class="cond">${esc(w.label || '')}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</aside>`;
   }
 
-  function cardNba(g) {
-    return `<article class="card nba ${g.status.state === 'in' ? 'live' : ''}" data-id="${esc(g.id)}" tabindex="0" role="button">
-      <div class="card-top"><span class="chip">NBA</span>${g.broadcast ? `<span>${esc(g.broadcast)}</span>` : ''}${g.odds ? `<span>${esc(g.odds)}</span>` : ''}${statusHtml(g)}</div>
-      <div class="teams">${teamRow(g, g.away)}${teamRow(g, g.home)}</div>
-      <div class="card-foot"><span class="venue">${esc(venueText(g))}</span></div>
-    </article>`;
+  function railRow(g, group) {
+    const teams = teamsInOrder(g);
+    const draw = g.status.state === 'post' && Number(g.home.score) === Number(g.away.score);
+    const rows = teams
+      .map((t) => {
+        const loser = isLoser(g, t);
+        let right = '';
+        if (group === 'final') right = `<span class="stile ${loser ? 'dim' : ''}">${esc(t.score ?? 0)}</span>`;
+        else if (g.status.state === 'pre' && t.record) right = `<span class="record">${esc(t.record)}</span>`;
+        return `<div class="trow ${loser ? 'loser' : ''}">${badge(t, 'sm')}<span class="tname">${esc(t.shortName)}</span>${tagHtml(t)}${g.sport === 'soccer' ? formHtml(t.last5) : ''}${right}</div>`;
+      })
+      .join('');
+    let time;
+    let timeCls = '';
+    if (group === 'final') {
+      time = finalText(g);
+      timeCls = 'muted';
+    } else if (isIrregular(g)) {
+      time = g.status.description;
+      timeCls = 'muted';
+    } else {
+      time = fmtTime(g.date);
+    }
+    return `<div class="rail-row"><div class="time ${timeCls}">${esc(time)}</div>
+      <div class="rail"><span class="marker" aria-hidden="true"></span>
+        <article class="row-card" data-id="${esc(g.id)}" tabindex="0" role="button" aria-label="${esc(accessibleName(g))}${draw ? ', draw' : ''}">
+          <div class="main">
+            <div class="teams">${rows}</div>
+            <div class="info"><div class="line">${metaLine(g)}</div><div class="venue">${esc(g.venue.name || '')}</div><div>${esc(g.venue.city || '')}</div></div>
+          </div>
+          ${weatherPanelHtml(g)}
+        </article>
+      </div></div>`;
   }
 
   // ---------- render day ----------
+  function allGames() {
+    const d = state.data;
+    return d ? [...d.nfl, ...d.nba, ...d.soccer] : [];
+  }
+  function visible(g) {
+    if (state.sportTab !== 'all' && g.sport !== state.sportTab) return false;
+    if (g.sport === 'soccer' && state.hiddenLeagues.has(g.league.slug)) return false;
+    return true;
+  }
+
+  function renderTabs(games) {
+    const counts = { all: games.length, nfl: 0, nba: 0, soccer: 0 };
+    for (const g of games) counts[g.sport]++;
+    const labels = { all: 'All', nfl: 'NFL', nba: 'NBA', soccer: 'Soccer' };
+    el.tabs.innerHTML = Object.keys(labels)
+      .map((k) => `<button class="tab" data-tab="${k}" aria-pressed="${state.sportTab === k}">${labels[k]}<span class="n">${counts[k]}</span></button>`)
+      .join('');
+  }
+
   function renderFilters(leagues, soccer) {
     const counts = new Map();
     for (const g of soccer) counts.set(g.league.slug, (counts.get(g.league.slug) || 0) + 1);
+    const disabled = state.sportTab === 'nfl' || state.sportTab === 'nba';
     el.filters.innerHTML = leagues
       .map((l) => {
         const on = !state.hiddenLeagues.has(l.slug);
-        const n = counts.get(l.slug) || 0;
-        return `<button class="filter ${on ? 'on' : ''}" data-slug="${esc(l.slug)}" aria-pressed="${on}">${esc(l.short || l.name)}${n ? ` · ${n}` : ''}</button>`;
+        return `<button class="chip-btn" data-slug="${esc(l.slug)}" aria-pressed="${on}" aria-disabled="${disabled}" ${disabled ? 'tabindex="-1"' : ''}>${esc(l.short || l.name)}<span class="n">${counts.get(l.slug) || 0}</span></button>`;
       })
       .join('');
   }
 
-  function renderSection(key, games, renderer, emptyText) {
-    const sec = el.sections[key];
-    const grid = $('[data-grid]', sec);
-    $('[data-count]', sec).textContent = games.length ? `${games.length} game${games.length === 1 ? '' : 's'}` : '';
-    grid.innerHTML = games.length ? games.map(renderer).join('') : `<div class="empty">${esc(emptyText)}</div>`;
-  }
+  const byKick = (a, b) => a.date.localeCompare(b.date) || SPORT_ORDER[a.sport] - SPORT_ORDER[b.sport];
+  const bySportThenKick = (a, b) => SPORT_ORDER[a.sport] - SPORT_ORDER[b.sport] || a.date.localeCompare(b.date);
 
   function render() {
     const d = state.data;
     if (!d) return;
+    const games = allGames();
     state.games.clear();
-    for (const g of [...d.nfl, ...d.nba, ...d.soccer]) state.games.set(g.id, g);
+    for (const g of games) state.games.set(g.id, g);
 
-    renderSection('nfl', d.nfl, cardNfl, 'No NFL games today.');
-    renderSection('nba', d.nba, cardNba, 'No NBA games today.');
+    renderTabs(games);
     renderFilters(d.leagues, d.soccer);
-    const soccer = d.soccer.filter((g) => !state.hiddenLeagues.has(g.league.slug));
-    renderSection('soccer', soccer, cardSoccer, d.soccer.length ? 'All leagues filtered out.' : 'No matches in the top-5 leagues, Champions League or Europa League today.');
+
+    const shown = games.filter(visible);
+    const live = shown.filter((g) => groupOf(g) === 'live').sort(bySportThenKick);
+    const upcoming = shown.filter((g) => groupOf(g) === 'upcoming').sort(byKick);
+    const final = shown.filter((g) => groupOf(g) === 'final').sort(byKick);
+
+    const head = (cls, label, n) =>
+      `<h2 class="group-head ${cls}">${cls === 'live' ? '<span class="dot" aria-hidden="true"></span>' : ''}${label}<span class="n" aria-label="${n} games">· ${n}</span></h2>`;
+    const parts = [];
+    if (live.length) parts.push(`<section class="group">${head('live', 'Live now', live.length)}<div class="live-grid">${live.map(liveCard).join('')}</div></section>`);
+    if (upcoming.length) parts.push(`<section class="group">${head('', 'Coming up', upcoming.length)}<div class="rail">${upcoming.map((g) => railRow(g, 'upcoming')).join('')}</div></section>`);
+    if (final.length) parts.push(`<section class="group">${head('', 'Final', final.length)}<div class="rail">${final.map((g) => railRow(g, 'final')).join('')}</div></section>`);
+    if (!parts.length) {
+      const msg = games.length ? 'No games match the current filters.' : 'No NFL, NBA or top-flight soccer games on this day.';
+      parts.push(`<div class="empty">${msg}</div>`);
+    }
+    el.groups.innerHTML = parts.join('');
 
     el.updated.textContent = `Updated ${timeFmt.format(new Date(d.generatedAt))}`;
     if (d.errors?.length) {
@@ -244,7 +329,7 @@
     el.datepick.value = isoDate(state.date);
     if (!silent) {
       el.updated.textContent = 'Loading…';
-      for (const key of Object.keys(el.sections)) $('[data-grid]', el.sections[key]).innerHTML = '<div class="empty">Loading…</div>';
+      el.groups.innerHTML = '<div class="empty">Loading…</div>';
     }
     try {
       const res = await fetch(`/api/day?date=${date}`);
@@ -265,8 +350,7 @@
 
   function scheduleRefresh() {
     clearTimeout(state.timer);
-    const d = state.data;
-    const anyLive = d && [...d.nfl, ...d.nba, ...d.soccer].some((g) => g.status.state === 'in');
+    const anyLive = allGames().some((g) => g.status.state === 'in');
     const isToday = state.date === ymd(new Date());
     if (!isToday && !anyLive) return;
     // With the live stream connected, scores arrive by push; the full reload only
@@ -276,25 +360,9 @@
   }
 
   // ---------- live updates (Server-Sent Events) ----------
-  const liveDot = $('#livedot');
   function setLive(on) {
     state.liveConnected = on;
-    liveDot.classList.toggle('hidden', !on);
-  }
-
-  function rerenderCard(id) {
-    const g = state.games.get(id);
-    const old = document.querySelector(`.card[data-id="${CSS.escape(id)}"]`);
-    if (!g || !old) return;
-    const renderer = g.sport === 'soccer' ? cardSoccer : g.sport === 'nfl' ? cardNfl : cardNba;
-    const tmp = document.createElement('div');
-    tmp.innerHTML = renderer(g);
-    const fresh = tmp.firstElementChild;
-    const hadFocus = document.activeElement === old;
-    old.replaceWith(fresh);
-    if (hadFocus) fresh.focus();
-    fresh.classList.add('flash');
-    setTimeout(() => fresh.classList.remove('flash'), 1200);
+    el.livedot.classList.toggle('hidden', !on);
   }
 
   function applyLive(u) {
@@ -303,7 +371,15 @@
     g.status = u.status;
     Object.assign(g.home, u.home);
     Object.assign(g.away, u.away);
-    rerenderCard(u.id);
+    // A game may move between groups (pre -> live -> final), so re-render the list.
+    const focused = document.activeElement?.closest?.('[data-id]')?.dataset.id;
+    render();
+    const card = document.querySelector(`[data-id="${CSS.escape(u.id)}"]`);
+    if (card) {
+      card.classList.add('flash');
+      setTimeout(() => card.classList.remove('flash'), 1200);
+    }
+    if (focused) document.querySelector(`[data-id="${CSS.escape(focused)}"]`)?.focus();
     if (state.modalId === u.id) {
       const head = $('#modal-title');
       const sub = head?.nextElementSibling;
@@ -341,6 +417,46 @@
     };
   }
 
+  function shiftDay(n) {
+    const dt = fromYmd(state.date);
+    dt.setDate(dt.getDate() + n);
+    state.date = ymd(dt);
+    loadDay();
+  }
+
+  // ---------- modal ----------
+  function openModal(html) {
+    el.modalBody.innerHTML = html;
+    el.modal.classList.remove('hidden');
+    el.modal.scrollTop = 0;
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal() {
+    el.modal.classList.add('hidden');
+    el.modalBody.innerHTML = '';
+    document.body.style.overflow = '';
+    stopModalRefresh();
+  }
+
+  function modalHead(g) {
+    const [left, right] = teamsInOrder(g);
+    const score = (t) => (g.status.state === 'pre' ? '' : `<span class="mscore">${esc(t.score ?? '')}</span>`);
+    const sep = g.sport === 'soccer' ? 'vs' : '@';
+    const sub = [
+      statusHtml(g),
+      g.venue.name ? `<span>${esc(venueText(g))}</span>` : '',
+      g.broadcast ? `<span>${esc(g.broadcast)}</span>` : '',
+      g.odds ? `<span class="spread">${esc(g.odds)}</span>` : '',
+    ]
+      .filter(Boolean)
+      .join('');
+    return `<div class="mhead" id="modal-title">
+      <div class="mteam">${img(left.logo, left.name)}<span>${esc(left.name)}</span>${score(left)}</div>
+      <span class="vs">${sep}</span>
+      <div class="mteam">${score(right)}${img(right.logo, right.name)}<span>${esc(right.name)}</span></div>
+    </div><div class="msub">${sub}</div>`;
+  }
+
   function startModalRefresh(id) {
     stopModalRefresh();
     state.modalId = id;
@@ -371,52 +487,13 @@
       const open = [...el.modalBody.querySelectorAll('details')].map((d) => d.open);
       const scroll = el.modal.scrollTop;
       el.modalBody.innerHTML = modalHead(g) + body;
-      el.modalBody.querySelectorAll('details').forEach((d, i) => { if (open[i]) d.open = true; });
+      el.modalBody.querySelectorAll('details').forEach((d, i) => {
+        if (open[i]) d.open = true;
+      });
       el.modal.scrollTop = scroll;
     } catch {
       /* keep the old body */
     }
-  }
-
-  function shiftDay(n) {
-    const dt = fromYmd(state.date);
-    dt.setDate(dt.getDate() + n);
-    state.date = ymd(dt);
-    loadDay();
-  }
-
-  // ---------- modal ----------
-  function openModal(html) {
-    el.modalBody.innerHTML = html;
-    el.modal.classList.remove('hidden');
-    el.modal.scrollTop = 0;
-    document.body.style.overflow = 'hidden';
-  }
-  function closeModal() {
-    el.modal.classList.add('hidden');
-    el.modalBody.innerHTML = '';
-    document.body.style.overflow = '';
-    stopModalRefresh();
-  }
-
-  function modalHead(g) {
-    const left = g.sport === 'soccer' ? g.home : g.away;
-    const right = g.sport === 'soccer' ? g.away : g.home;
-    const score = (t) => (g.status.state === 'pre' ? '' : `<span class="mscore">${esc(t.score ?? '')}</span>`);
-    const sep = g.sport === 'soccer' ? 'vs' : '@';
-    const sub = [
-      statusHtml(g),
-      g.venue.name ? `<span>${esc(venueText(g))}</span>` : '',
-      g.broadcast ? `<span>${esc(g.broadcast)}</span>` : '',
-      g.odds ? `<span>${esc(g.odds)}</span>` : '',
-    ]
-      .filter(Boolean)
-      .join('');
-    return `<div class="mhead" id="modal-title">
-      <div class="mteam">${img(left.logo, left.name)}<span>${esc(left.name)}</span>${score(left)}</div>
-      <span class="vs">${sep}</span>
-      <div class="mteam">${score(right)}${img(right.logo, right.name)}<span>${esc(right.name)}</span></div>
-    </div><div class="msub">${sub}</div>`;
   }
 
   async function openGame(id) {
@@ -442,9 +519,7 @@
     const s = p.stats || {};
     const cards = `${s.YC ? '<span class="cardi yc" title="Yellow card"></span>' : ''}${s.RC ? '<span class="cardi rc" title="Red card"></span>' : ''}`;
     const flags = `${p.subbedOut ? '<span class="flag off" title="Substituted off">off</span>' : ''}${p.subbedIn ? '<span class="flag on" title="Substituted on">on</span>' : ''}`;
-    const cells = showStats
-      ? SOCCER_COLS.map((k) => `<td class="${s[k] ? 'hi' : ''}">${s[k] ?? 0}</td>`).join('')
-      : '';
+    const cells = showStats ? SOCCER_COLS.map((k) => `<td class="${s[k] ? 'hi' : ''}">${s[k] ?? 0}</td>`).join('') : '';
     return `<tr class="${sub ? 'sub' : ''}"><td class="num">${esc(p.jersey || '')}</td><td class="pname">${esc(p.name)}${cards}${flags}</td><td class="pos">${esc(p.pos || '')}</td>${cells}</tr>`;
   }
 
@@ -562,7 +637,7 @@
       .reverse()
       .map((r) => {
         const res = (r.result || '-').toUpperCase();
-        return `<tr><td><span class="f f-${esc(res)}">${esc(res)}</span></td><td>${esc(r.score || '')}</td><td class="op">${r.opponentLogo ? img(r.opponentLogo, r.opponent) : ''}<span>${r.isHome ? 'vs' : '@'} ${esc(r.opponent || '')}</span></td><td class="mut">${r.competition ? esc(r.competition) : ''}</td><td class="mut">${r.date ? fmtShort(r.date) : ''}</td></tr>`;
+        return `<tr><td><span class="f f-${esc(res)}">${esc(res)}</span></td><td class="score">${esc(r.score || '')}</td><td class="op">${r.opponentLogo ? img(r.opponentLogo, r.opponent) : ''}<span>${r.isHome ? 'vs' : '@'} ${esc(r.opponent || '')}</span></td><td class="mut">${r.competition ? esc(r.competition) : ''}</td><td class="mut">${r.date ? fmtShort(r.date) : ''}</td></tr>`;
       })
       .join('')}</table>`;
   }
@@ -575,7 +650,7 @@
       const ordered = [...d.lineups].sort((a, b) => (a.homeAway === 'home' ? -1 : 1) - (b.homeAway === 'home' ? -1 : 1));
       parts.push(ordered.map((l) => lineupPanel(l, null, started)).join(''));
     } else {
-      parts.push(`<div class="panel full"><h3>Lineups</h3><p class="note" style="margin:0">Starting XIs are not out yet. ESPN publishes them roughly an hour before kickoff.${d.previousLineups?.length ? ' Below is each side\'s most recent starting XI.' : ''}</p></div>`);
+      parts.push(`<div class="panel full"><h3>Lineups</h3><p class="note" style="margin:0">Starting XIs are not out yet. ESPN publishes them roughly an hour before kickoff.${d.previousLineups?.length ? " Below is each side's most recent starting XI." : ''}</p></div>`);
       for (const l of d.previousLineups || []) {
         const c = l.context;
         const title = c ? `Last XI: ${esc(c.result || '')} ${esc(c.score || '')} ${c.isHome ? 'vs' : '@'} ${esc(c.opponent || '')} · ${c.date ? fmtShort(c.date) : ''}${c.competition ? ' · ' + esc(c.competition) : ''}` : 'Most recent starting XI';
@@ -588,7 +663,7 @@
         .map((k) => {
           const t = teamOf(k.teamId);
           const icon = /red/i.test(k.type) ? '🟥' : /yellow/i.test(k.type) ? '🟨' : /penalty.*miss|missed/i.test(k.type) ? '❌' : '⚽';
-          return `<li><span class="clk">${esc(k.clock)}</span><span>${icon}</span><span>${t ? img(t.logo, t.name, '') : ''}${esc(k.player ? `${k.player} · ` : '')}${esc(k.type)}${t ? ` <span class="mut" style="color:var(--muted)">(${esc(t.shortName)})</span>` : ''}</span></li>`;
+          return `<li><span class="clk">${esc(k.clock)}</span><span>${icon}</span><span>${t ? img(t.logo, t.name, '') : ''}${esc(k.player ? `${k.player} · ` : '')}${esc(k.type)}${t ? ` <span style="color:var(--muted)">(${esc(t.shortName)})</span>` : ''}</span></li>`;
         })
         .join('')}</ul></div>`);
     }
@@ -604,11 +679,11 @@
   function weatherPanel(g) {
     const w = g.weather;
     if (!w) return '';
-    if (w.indoor) return `<div class="panel"><h3>Weather</h3><div class="wxbig">${svg('indoor')}<div><div class="temp" style="font-size:18px">Indoors</div><div class="det">Dome or closed roof</div></div></div></div>`;
+    if (w.indoor) return `<div class="panel"><h3>Weather</h3><div class="wxbig">${svg('indoor', 'Indoors')}<div><div class="temp" style="font-size:18px">Indoors</div><div class="det">Dome or closed roof</div></div></div></div>`;
     const det = [w.label, w.windMph != null ? `wind ${Math.round(w.windMph)} mph${w.gustMph ? ` (gusts ${Math.round(w.gustMph)})` : ''}` : null, w.precipProb != null ? `${w.precipProb}% chance of precipitation` : null]
       .filter(Boolean)
       .join(' · ');
-    return `<div class="panel"><h3>Weather at kickoff${w.place ? `<span class="right">${esc(w.place)}</span>` : ''}</h3><div class="wxbig">${svg(w.icon)}<div><div class="temp">${deg(w.tempF)}</div><div class="det">${esc(det)}</div></div></div></div>`;
+    return `<div class="panel"><h3>Weather at kickoff${w.place ? `<span class="right">${esc(w.place)}</span>` : ''}</h3><div class="wxbig">${svg(w.icon, w.label || 'Weather')}<div><div class="temp">${deg(w.tempF)}</div><div class="det">${esc(det)}</div></div></div></div>`;
   }
 
   // ---------- NFL detail ----------
@@ -677,9 +752,7 @@
       if (!cat || !cat.athletes.length) return '';
       const table = boxTable(cat.labels, cat.athletes, { sortBy: c.sortBy, limit: c.limit, descriptions: cat.descriptions });
       const more = c.limit && cat.athletes.length > c.limit ? ` (top ${c.limit} of ${cat.athletes.length})` : '';
-      return c.collapsible
-        ? `<details><summary>${esc(c.title)}${more}</summary>${table}</details>`
-        : `<div class="subhead">${esc(c.title)}</div>${table}`;
+      return c.collapsible ? `<details><summary>${esc(c.title)}${more}</summary>${table}</details>` : `<div class="subhead">${esc(c.title)}</div>${table}`;
     }).join('');
     return `<div class="panel"><h3>${img(t.logo, t.name)} ${esc(t.name)} <span class="right">box score</span></h3>${blocks}</div>`;
   }
@@ -755,22 +828,29 @@
     state.date = el.datepick.value.replace(/-/g, '');
     loadDay();
   });
+  el.tabs.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-tab]');
+    if (!b) return;
+    state.sportTab = b.dataset.tab;
+    save('sportTab', state.sportTab);
+    render();
+  });
   el.filters.addEventListener('click', (e) => {
     const b = e.target.closest('[data-slug]');
-    if (!b) return;
+    if (!b || b.getAttribute('aria-disabled') === 'true') return;
     const slug = b.dataset.slug;
     if (state.hiddenLeagues.has(slug)) state.hiddenLeagues.delete(slug);
     else state.hiddenLeagues.add(slug);
     save('hiddenLeagues', [...state.hiddenLeagues]);
     render();
   });
-  document.getElementById('main').addEventListener('click', (e) => {
-    const card = e.target.closest('.card[data-id]');
+  el.groups.addEventListener('click', (e) => {
+    const card = e.target.closest('[data-id]');
     if (card) openGame(card.dataset.id);
   });
-  document.getElementById('main').addEventListener('keydown', (e) => {
+  el.groups.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    const card = e.target.closest('.card[data-id]');
+    const card = e.target.closest('[data-id]');
     if (card) {
       e.preventDefault();
       openGame(card.dataset.id);
@@ -781,7 +861,7 @@
   });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !el.modal.classList.contains('hidden')) closeModal();
-    if (el.modal.classList.contains('hidden') && !e.target.closest('input')) {
+    if (el.modal.classList.contains('hidden') && !e.target.closest?.('input')) {
       if (e.key === 'ArrowLeft') shiftDay(-1);
       if (e.key === 'ArrowRight') shiftDay(1);
     }
