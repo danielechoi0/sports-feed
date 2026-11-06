@@ -23,6 +23,7 @@ import {
   normalizeRoster,
 } from './lib/espn.js';
 import { venueWeather } from './lib/weather.js';
+import { buildShotModel } from './lib/shotModel.js';
 import { getRankings, warmRankings } from './lib/nflStats.js';
 import { cached, pLimit, cacheStats } from './lib/cache.js';
 
@@ -404,6 +405,13 @@ export async function handle(req, res) {
     if (!/^\d{8}$/.test(date)) return sendJson(res, 400, { error: 'date must be YYYYMMDD' });
     const games = await cached(`livepoll:${date}`, 3_000, () => refreshLive(date));
     return sendJson(res, 200, { date, time: new Date().toISOString(), games });
+  }
+  const sm = pathname.match(/^\/api\/soccer\/([a-z0-9.]+)\/(\d+)\/shotmodel$/);
+  if (sm) {
+    const [, slug, id] = sm;
+    soccerPath(slug); // validates the league
+    const data = await cached(`shotmodel:${slug}:${id}`, 60_000, () => buildShotModel(slug, id));
+    return sendJson(res, 200, data);
   }
   const m = pathname.match(/^\/api\/game\/(nfl|nba|soccer)\/([a-z0-9.]+)\/(\d+)$/);
   if (m) {

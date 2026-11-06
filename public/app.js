@@ -536,6 +536,7 @@
       if (!res.ok) return;
       const detail = await res.json();
       if (state.modalId !== id || el.modal.classList.contains('hidden')) return;
+      if (g.sport === 'soccer' && sim.data && sim.gameId === id) await loadSim(g, { silent: true });
       const body = g.sport === 'soccer' ? detailSoccer(g, detail) : g.sport === 'nfl' ? detailNfl(g, detail) : detailNba(g, detail);
       const open = [...el.modalBody.querySelectorAll('details')].map((d) => d.open);
       const scroll = el.modal.scrollTop;
@@ -713,6 +714,7 @@
     const parts = [];
     const started = g.status.state !== 'pre';
     if (started) parts.push(comparePanel('Match stats', orderTeams(d.teamStats, g.home.id), SOCCER_TEAM_ROWS));
+    parts.push(simPanelHtml(g));
     if (d.lineupsAvailable) {
       const ordered = [...d.lineups].sort((a, b) => (a.homeAway === 'home' ? -1 : 1) - (b.homeAway === 'home' ? -1 : 1));
       parts.push(ordered.map((l) => lineupPanel(l, null, started)).join(''));
@@ -742,6 +744,422 @@
     parts.push(weatherPanel(g));
     return `<div class="mgrid">${parts.join('')}</div>`;
   }
+
+  // ---------- soccer shot simulator ----------
+  // Server supplies per-player rates (form-weighted, opponent-adjusted, shrunk
+  // toward position priors) and team factors; the Monte Carlo runs here.
+  const sim = { gameId: null, data: null, scenario: null, edits: null, loading: false, error: null, results: null, remainingAuto: true };
+  const SIM_RUNS = 10000;
+  const TEMPO = { slow: 0.85, normal: 1, fast: 1.15 };
+
+  function simReset(gameId) {
+    sim.gameId = gameId;
+    sim.data = null;
+    sim.scenario = null;
+    sim.edits = null;
+    sim.error = null;
+    sim.results = null;
+    sim.loading = false;
+    sim.remainingAuto = true;
+  }
+
+  function simDefaultScenario(d) {
+    const now = d.match.state === 'pre' ? 0 : d.match.minute;
+    return {
+      scoreState: 'current',
+      red: 'none',
+      redMinute: Math.min(90, now + 10),
+      tempo: 'normal',
+      remaining: d.match.state === 'post' ? 0 : Math.max(0, 90 - now),
+      threshold: 10,
+      subMinute: Math.min(90, now + 15),
+      playerTeam: 'all',
+      showAll: false,
+    };
+  }
+
+  async function loadSim(g, { silent = false } = {}) {
+    if (sim.gameId !== g.id) simReset(g.id);
+    if (!silent) {
+      sim.loading = true;
+      sim.error = null;
+      simRender(g);
+    }
+    try {
+      const res = await fetch(`/api/soccer/${g.league.slug}/${g.id}/shotmodel`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (sim.gameId !== g.id) return;
+      sim.data = data;
+      if (!sim.scenario) sim.scenario = simDefaultScenario(data);
+      else if (sim.remainingAuto) sim.scenario.remaining = data.match.state === 'post' ? 0 : Math.max(0, 90 - (data.match.state === 'pre' ? 0 : data.match.minute));
+      if (!sim.edits) sim.edits = {};
+      simCompute();
+      if (sim.results && !sim.thresholdTouched) {
+        // Default y to the larger side's expected shots so both team probabilities are informative.
+        sim.scenario.threshold = Math.max(1, Math.round(Math.max(...sim.results.teams.map((t) => t.mean))));
+        simCompute();
+      }
+    } catch (e) {
+      sim.error = e.message;
+    } finally {
+      sim.loading = false;
+      simRender(g);
+    }
+  }
+
+  function simRender(g) {
+    const panel = document.getElementById('sim-panel');
+    if (!panel) return;
+    panel.innerHTML = simInner(g);
+  }
+
+  function simPanelHtml(g) {
+    if (sim.gameId !== g.id) simReset(g.id);
+    return `<div class="panel full sim" id="sim-panel">${simInner(g)}</div>`;
+  }
+
+  // ---- model ----
+  function poisson(lambda) {
+    if (lambda <= 0) return 0;
+    if (lambda > 30) {
+      // normal approximation for large rates
+      const u = Math.random();
+      const v = Math.random();
+      const z = Math.sqrt(-2 * Math.log(u || 1e-12)) * Math.cos(2 * Math.PI * v);
+      return Math.max(0, Math.round(lambda + z * Math.sqrt(lambda)));
+    }
+    const L = Math.exp(-lambda);
+    let k = 0;
+    let p = 1;
+    do {
+      k++;
+      p *= Math.random();
+    } while (p > L);
+    return k - 1;
+  }
+  function binomial(n, p) {
+    let k = 0;
+    for (let i = 0; i < n; i++) if (Math.random() < p) k++;
+    return k;
+  }
+
+  // Build per-player expected shots (lambda) for the remainder, applying the scenario and lineup edits.
+  function simPlan(d, sc, edits) {
+    const pre = d.match.state === 'pre';
+    const now = pre ? 0 : d.match.minute;
+    const end = now + Math.max(0, Number(sc.remaining) || 0);
+    const span = Math.max(0, end - now);
+    const [home, away] = [d.teams.find((t) => t.id === d.match.homeId), d.teams.find((t) => t.id === d.match.awayId)];
+    const teams = [home, away].filter(Boolean);
+    const plan = { now, end, span, teams: [] };
+
+    for (const t of teams) {
+      const o = teams.find((x) => x.id !== t.id) || t;
+      const isHome = t.id === d.match.homeId;
+      // score state
+      let stateMod = 1;
+      const gh = d.match.score.home;
+      const ga = d.match.score.away;
+      const mine = isHome ? gh : ga;
+      const theirs = isHome ? ga : gh;
+      const lead = (s) => (s === 'level' ? 0 : s === 'home' ? (isHome ? 1 : -1) : s === 'away' ? (isHome ? -1 : 1) : Math.sign(mine - theirs));
+      const ld = lead(sc.scoreState);
+      if (ld < 0) stateMod = 1.2;
+      else if (ld > 0) stateMod = 0.85;
+      // red cards: scenario (time-weighted) + already shown
+      let redMod = 1;
+      if (sc.red !== 'none' && span > 0) {
+        const rm = Math.min(end, Math.max(now, Number(sc.redMinute) || now));
+        const f = (end - rm) / span;
+        const scenarioTeam = sc.red === 'home' ? d.match.homeId : d.match.awayId;
+        redMod *= scenarioTeam === t.id ? 1 + (0.65 - 1) * f : 1 + (1.3 - 1) * f;
+      }
+      if (t.redCards > 0) redMod *= 0.8;
+      if (o.redCards > 0) redMod *= 1.2;
+      const mult = o.leakiness * t.homeAwayFactor * (o.shape?.factor || 1) * (TEMPO[sc.tempo] || 1) * stateMod * redMod;
+      const ed = edits[t.id] || { off: {}, on: {} };
+      const goalBase = Math.max(0.05, 1 - (o.keeper?.saveRate ?? 0.7)) / 0.3;
+
+      const players = [];
+      let lost = 0;
+      for (const p of t.players) {
+        let s = null;
+        let e = end;
+        const offAt = ed.off[p.id];
+        const onAt = ed.on[p.id];
+        if (p.onPitch) s = now;
+        else if (p.role === 'sub' && !p.subbedIn && onAt != null) s = Math.min(end, Math.max(now, onAt));
+        else if (!d.match.lineupsAnnounced && p.role === 'starter' && offAt == null) s = now;
+        if (s != null && offAt != null) e = Math.min(end, Math.max(s, offAt));
+        if (s == null && p.onPitch && offAt != null) s = now;
+        const minutes = s == null ? 0 : Math.max(0, e - s);
+        const lambda = (p.rate.shots * mult * minutes) / 90;
+        const removedAfter = offAt != null && s != null ? Math.max(0, end - e) : 0;
+        if (removedAfter > 0) lost += (0.5 * p.rate.shots * mult * removedAfter) / 90;
+        players.push({
+          p,
+          s,
+          e,
+          minutes,
+          lambda,
+          goalProb: Math.min(0.6, p.rate.conv * goalBase),
+          activeAtEnd: s != null && e >= end && minutes > 0,
+          edited: offAt != null ? 'off' : onAt != null ? 'on' : null,
+        });
+      }
+      const activeSum = players.filter((x) => x.activeAtEnd).reduce((a, x) => a + x.lambda, 0);
+      if (lost > 0 && activeSum > 0) for (const x of players) if (x.activeAtEnd) x.lambda += (lost * x.lambda) / activeSum;
+      plan.teams.push({ t, o, isHome, mult, stateMod, redMod, players, lost });
+    }
+    return plan;
+  }
+
+  function simCompute() {
+    const d = sim.data;
+    if (!d) return;
+    const sc = sim.scenario;
+    const plan = simPlan(d, sc, sim.edits || {});
+    const y = Math.max(0, Number(sc.threshold) || 0);
+    const t0 = performance.now();
+    const teamAcc = plan.teams.map((pt) => ({ shots: 0, sot: 0, goals: 0, ge: 0, hist: new Map(), players: pt.players.map(() => ({ shots: 0, sot: 0, goals: 0, g1: 0, c1: 0, c2: 0, c3: 0 })) }));
+    const totalHist = new Map();
+    let totalGe = 0;
+    let totalSum = 0;
+    for (let r = 0; r < SIM_RUNS; r++) {
+      let total = 0;
+      plan.teams.forEach((pt, ti) => {
+        const acc = teamAcc[ti];
+        let ts = pt.t.shotsSoFar;
+        let tsot = pt.t.sotSoFar;
+        let tg = pt.t.goals;
+        pt.players.forEach((x, pi) => {
+          if (x.lambda <= 0) return;
+          const k = poisson(x.lambda);
+          if (!k) return;
+          const sot = binomial(k, x.p.rate.sotRatio);
+          const goals = binomial(k, x.goalProb);
+          const pa = acc.players[pi];
+          pa.shots += k;
+          pa.sot += sot;
+          pa.goals += goals;
+          if (k >= 1) pa.c1++;
+          if (k >= 2) pa.c2++;
+          if (k >= 3) pa.c3++;
+          if (goals >= 1) pa.g1++;
+          ts += k;
+          tsot += sot;
+          tg += goals;
+        });
+        acc.shots += ts;
+        acc.sot += tsot;
+        acc.goals += tg;
+        if (ts >= y) acc.ge++;
+        acc.hist.set(ts, (acc.hist.get(ts) || 0) + 1);
+        total += ts;
+      });
+      totalSum += total;
+      if (total >= y) totalGe++;
+      totalHist.set(total, (totalHist.get(total) || 0) + 1);
+    }
+    const N = SIM_RUNS;
+    sim.results = {
+      ms: performance.now() - t0,
+      plan,
+      threshold: y,
+      teams: plan.teams.map((pt, ti) => {
+        const acc = teamAcc[ti];
+        return {
+          id: pt.t.id,
+          name: pt.t.name,
+          abbrev: pt.t.abbrev,
+          logo: pt.t.logo,
+          isHome: pt.isHome,
+          mean: acc.shots / N,
+          sot: acc.sot / N,
+          goals: acc.goals / N,
+          pGe: acc.ge / N,
+          mult: pt.mult,
+          hist: acc.hist,
+          players: pt.players.map((x, pi) => {
+            const pa = acc.players[pi];
+            return { ...x, xShots: pa.shots / N, xSot: pa.sot / N, xGoals: pa.goals / N, p1: pa.c1 / N, p2: pa.c2 / N, p3: pa.c3 / N, pGoal: pa.g1 / N };
+          }),
+        };
+      }),
+      total: { mean: totalSum / N, pGe: totalGe / N, hist: totalHist },
+    };
+  }
+
+  // ---- rendering ----
+  const pct = (x) => `${Math.round(x * 100)}%`;
+  const shortName = (p) => p.shortName || String(p.name || '').replace(/^(\S)\S+\s+(?=\S)/, '$1. ');
+  const num1 = (x) => (Math.round(x * 10) / 10).toFixed(1);
+  const simSel = (field, value, opts) =>
+    `<select class="sel" data-sim-field="${field}">${opts.map(([v, l]) => `<option value="${esc(v)}" ${String(v) === String(value) ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+
+  function simInner(g) {
+    const head = `<h3>Shot simulator <span class="right">player-level Monte Carlo · ${SIM_RUNS.toLocaleString()} runs</span></h3>`;
+    if (sim.error) return `${head}<p class="error">Could not build the model: ${esc(sim.error)}</p><button class="btn" data-sim="load">Retry</button>`;
+    if (!sim.data) {
+      if (sim.loading) return `${head}<p class="note" style="margin:0">Building the model: last ten matches per club, every player's season numbers, opponent strength…</p>`;
+      return `${head}<p class="note" style="margin:0 0 10px">Simulate how many shots each side and each player will take, under a thesis you set: score state, red cards, tempo, and your own substitutions. Rates come from each player's recent form and season stats, adjusted for the opposition.</p><button class="btn primary" data-sim="load">Load simulator</button>`;
+    }
+    const d = sim.data;
+    const sc = sim.scenario;
+    const r = sim.results;
+    const home = d.teams.find((t) => t.id === d.match.homeId);
+    const away = d.teams.find((t) => t.id === d.match.awayId);
+    const live = d.match.state === 'in';
+    const post = d.match.state === 'post';
+    const stateLine = post
+      ? 'Match finished: the simulation below starts from the final state, so set minutes remaining to replay a hypothetical.'
+      : live
+        ? `Live: minute ${d.match.minute}${d.match.clock ? ` (${esc(d.match.clock)})` : ''}, ${esc(home.abbrev)} ${d.match.score.home}–${d.match.score.away} ${esc(away.abbrev)}, shots so far ${home.shotsSoFar}–${away.shotsSoFar}. Totals below include shots already taken.`
+        : d.match.lineupsAnnounced
+          ? 'Pre-match: confirmed lineups.'
+          : 'Pre-match: lineups not announced yet, so each side starts from its most recent starting XI. Edit them below.';
+
+    const controls = `<div class="sim-controls">
+      <label><span>Score state</span>${simSel('scoreState', sc.scoreState, [['current', 'As it stands'], ['level', 'Level'], ['home', `${home.abbrev} leads`], ['away', `${away.abbrev} leads`]])}</label>
+      <label><span>Red card</span>${simSel('red', sc.red, [['none', 'None'], ['home', `${home.abbrev} player`], ['away', `${away.abbrev} player`]])}</label>
+      <label><span>Red at min</span><input class="inp" type="number" min="0" max="120" data-sim-field="redMinute" value="${esc(sc.redMinute)}" ${sc.red === 'none' ? 'disabled' : ''}></label>
+      <label><span>Tempo</span>${simSel('tempo', sc.tempo, [['slow', 'Slow'], ['normal', 'Normal'], ['fast', 'Fast']])}</label>
+      <label><span>Minutes left</span><input class="inp" type="number" min="0" max="120" data-sim-field="remaining" value="${esc(sc.remaining)}"></label>
+      <label><span>Threshold (y shots)</span><input class="inp" type="number" min="0" max="60" data-sim-field="threshold" value="${esc(sc.threshold)}"></label>
+      <label><span>Sub minute</span><input class="inp" type="number" min="0" max="120" data-sim-field="subMinute" value="${esc(sc.subMinute)}"></label>
+      <button class="btn" data-sim="reset" title="Clear lineup edits and scenario">Reset</button>
+    </div>`;
+
+    const tiles = r
+      ? `<div class="sim-tiles">
+        ${[r.teams[0], r.teams[1]].filter(Boolean).map((t) => `<div class="tile-stat"><div class="k">${img(t.logo, t.name)} ${esc(t.abbrev)} ≥ ${r.threshold} shots</div><div class="v">${pct(t.pGe)}</div><div class="s">exp ${num1(t.mean)} shots · ${num1(t.sot)} on target · ${num1(t.goals)} goals</div></div>`).join('')}
+        <div class="tile-stat total"><div class="k">Total ≥ ${r.threshold} shots</div><div class="v">${pct(r.total.pGe)}</div><div class="s">exp ${num1(r.total.mean)} shots in total</div></div>
+      </div>`
+      : '';
+
+    const hist = r ? simHistogram(r.total.hist, r.threshold, r.total.mean) : '';
+
+    const lineupCols = [home, away].map((t) => simLineupCol(t, r)).join('');
+
+    const table = r ? simPlayerTable(r, sc) : '';
+
+    const foot = `<p class="note sim-foot">How it works: each player's shots per 90 blend recent form (last ${d.meta.historyMatches} club matches, exponentially weighted, scaled by the defenses faced) with league-season totals, shrunk toward a position prior when the sample is small. The team rate is the sum of the players on the pitch × opposition leakiness (${home.abbrev} ${home.leakiness}, ${away.abbrev} ${away.leakiness}; 1.0 = league average) × home/away × shape × scenario. Goals thin from shots using each player's conversion and the opposing keeper's save rate (${esc(home.keeper?.name || '')} ${pct(home.keeper?.saveRate ?? 0.7)}, ${esc(away.keeper?.name || '')} ${pct(away.keeper?.saveRate ?? 0.7)}). Opposition lineup edits affect the model only through the keeper and shape; defenders are not modeled individually. League avg ${d.league.avgShots} shots per team. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached)${r ? `, simulated in ${Math.round(r.ms)} ms` : ''}.</p>`;
+
+    return `${head}<p class="note" style="margin:0 0 10px">${stateLine}</p>${controls}${tiles}${hist}<div class="sim-lineups">${lineupCols}</div>${table}${foot}`;
+  }
+
+  function simHistogram(histMap, y, mean) {
+    const entries = [...histMap.entries()].sort((a, b) => a[0] - b[0]);
+    if (!entries.length) return '';
+    const max = Math.max(...entries.map((e) => e[1]));
+    const lo = entries[0][0];
+    const hi = entries[entries.length - 1][0];
+    const bars = [];
+    for (let k = lo; k <= hi; k++) {
+      const n = histMap.get(k) || 0;
+      const h = Math.round((n / max) * 100);
+      bars.push(`<div class="hbar ${k >= y ? 'ge' : ''}" style="height:${h}%" title="${k} shots: ${pct(n / SIM_RUNS)}"><span>${k}</span></div>`);
+    }
+    return `<div class="sim-hist"><div class="hlabel">Distribution of total shots · mean ${num1(mean)} · shaded = at or above ${y}</div><div class="hbars">${bars.join('')}</div></div>`;
+  }
+
+  function simLineupCol(t, r) {
+    const rt = r?.teams.find((x) => x.id === t.id);
+    const byId = new Map((rt?.players || []).map((x) => [x.p.id, x]));
+    const d = sim.data;
+    const chip = (p) => {
+      const x = byId.get(p.id);
+      const on = x && x.minutes > 0;
+      const label = `${esc(shortName(p))}<span class="pp">${esc(p.pos || '')}</span>`;
+      const rate = `<span class="pr" title="expected shots in the remaining span">${x ? num1(x.xShots) : ''}</span>`;
+      if (x?.edited === 'off') return `<button class="pchip off" data-sim="restore:${t.id}:${p.id}" title="Taken off at ${x.e}'. Click to restore">${label}<span class="pm">off ${x.e}'</span></button>`;
+      if (x?.edited === 'on') return `<button class="pchip on" data-sim="restore:${t.id}:${p.id}" title="Brought on at ${x.s}'. Click to undo">${label}<span class="pm">on ${x.s}'</span>${rate}</button>`;
+      if (on) return `<button class="pchip" data-sim="off:${t.id}:${p.id}" title="Click to take off at the sub minute">${label}${rate}</button>`;
+      if (p.subbedOut || p.redMin != null) return `<span class="pchip gone" title="${p.redMin != null ? 'Sent off' : 'Substituted'}">${label}<span class="pm">${p.redMin != null ? `red ${p.redMin}'` : `off ${p.subOutMin ?? ''}'`}</span></span>`;
+      return `<button class="pchip bench" data-sim="on:${t.id}:${p.id}" title="Click to bring on at the sub minute">+ ${label}</button>`;
+    };
+    const onPitch = t.players.filter((p) => byId.get(p.id)?.minutes > 0 || byId.get(p.id)?.edited === 'off');
+    const bench = t.players.filter((p) => !onPitch.includes(p) && !(p.subbedOut || p.redMin != null));
+    const gone = t.players.filter((p) => !onPitch.includes(p) && (p.subbedOut || p.redMin != null));
+    const src = t.lineupSource ? `<span class="right">last XI vs ${esc(t.lineupSource.opponent || '')}</span>` : t.formation ? `<span class="right">${esc(t.formation)}</span>` : '';
+    return `<div class="sim-team"><h4>${img(t.logo, t.name)} ${esc(t.name)}${src}</h4>
+      <div class="chips-wrap">${onPitch.map(chip).join('')}</div>
+      ${bench.length ? `<div class="subhead">Bench</div><div class="chips-wrap">${bench.map(chip).join('')}</div>` : ''}
+      ${gone.length ? `<div class="chips-wrap gone-wrap">${gone.map(chip).join('')}</div>` : ''}
+    </div>`;
+  }
+
+  function simPlayerTable(r, sc) {
+    let rows = r.teams.flatMap((t) => t.players.filter((x) => x.minutes > 0).map((x) => ({ ...x, team: t })));
+    if (sc.playerTeam !== 'all') rows = rows.filter((x) => x.team.id === sc.playerTeam);
+    rows.sort((a, b) => b.xShots - a.xShots);
+    const limit = sc.showAll ? rows.length : 12;
+    const formTag = (fi) => (fi >= 1.25 ? '<span class="fi hot" title="Recent form above season rate">hot</span>' : fi <= 0.75 ? '<span class="fi cold" title="Recent form below season rate">cold</span>' : '');
+    const body = rows
+      .slice(0, limit)
+      .map(
+        (x) => `<tr><td class="pname">${esc(shortName(x.p))}<span class="pos">${esc(x.p.pos || '')}</span>${formTag(x.p.rate.formIndex)}</td><td class="pos">${esc(x.team.abbrev)}</td><td>${x.minutes}'</td><td title="rate per 90: form ${x.p.rate.components.form90 ?? '–'} · season ${x.p.rate.components.season90 ?? '–'} · prior ${x.p.rate.components.prior}">${num1(x.p.rate.shots)}</td><td class="hi">${num1(x.xShots)}</td><td>${pct(x.p1)}</td><td>${pct(x.p2)}</td><td>${pct(x.p3)}</td><td>${num1(x.xSot)}</td><td>${pct(x.pGoal)}</td></tr>`,
+      )
+      .join('');
+    const teamOpts = [['all', 'Both teams'], ...r.teams.map((t) => [t.id, t.abbrev])];
+    return `<div class="sim-table"><div class="subhead" style="display:flex;align-items:center;gap:10px">Players <span style="font-weight:400;text-transform:none;letter-spacing:0">${simSel('playerTeam', sc.playerTeam, teamOpts)}</span></div>
+      <div class="scroll"><table class="box"><thead><tr><th>Player</th><th>Team</th><th title="minutes simulated">Min</th><th title="shots per 90 (model rate)">/90</th><th title="expected shots in the span">xSh</th><th>≥1</th><th>≥2</th><th>≥3</th><th title="expected shots on target">xSOT</th><th title="probability of at least one goal">Goal</th></tr></thead><tbody>${body}</tbody></table></div>
+      ${rows.length > 12 ? `<button class="btn small" data-sim="toggleAll">${sc.showAll ? 'Show top 12' : `Show all ${rows.length}`}</button>` : ''}</div>`;
+  }
+
+  function simAction(action, g) {
+    const [kind, teamId, pid] = action.split(':');
+    if (kind === 'load') return loadSim(g);
+    if (!sim.data) return;
+    const sc = sim.scenario;
+    if (kind === 'reset') {
+      sim.scenario = simDefaultScenario(sim.data);
+      sim.thresholdTouched = false;
+      sim.remainingAuto = true;
+      sim.edits = {};
+    } else if (kind === 'toggleAll') {
+      sc.showAll = !sc.showAll;
+    } else if (kind === 'off' || kind === 'on' || kind === 'restore') {
+      const ed = (sim.edits[teamId] = sim.edits[teamId] || { off: {}, on: {} });
+      const m = Math.max(0, Number(sc.subMinute) || 0);
+      if (kind === 'off') ed.off[pid] = m;
+      if (kind === 'on') ed.on[pid] = m;
+      if (kind === 'restore') {
+        delete ed.off[pid];
+        delete ed.on[pid];
+      }
+    }
+    simCompute();
+    simRender(g);
+  }
+
+  function simField(field, value, g) {
+    if (!sim.scenario) return;
+    const sc = sim.scenario;
+    if (field === 'remaining') sim.remainingAuto = false;
+    if (field === 'threshold') sim.thresholdTouched = true;
+    sc[field] = ['redMinute', 'remaining', 'threshold', 'subMinute'].includes(field) ? Number(value) : value;
+    simCompute();
+    simRender(g);
+    if (field !== 'subMinute') {
+      const again = document.querySelector(`#sim-panel [data-sim-field="${field}"]`);
+      if (again && again.tagName === 'INPUT') again.focus();
+    }
+  }
+
+  el.modalBody.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-sim]');
+    if (!b) return;
+    const g = state.games.get(state.modalId || sim.gameId);
+    if (g) simAction(b.dataset.sim, g);
+  });
+  el.modalBody.addEventListener('change', (e) => {
+    const f = e.target.closest('[data-sim-field]');
+    if (!f) return;
+    const g = state.games.get(state.modalId || sim.gameId);
+    if (g) simField(f.dataset.simField, f.value, g);
+  });
 
   function weatherPanel(g) {
     const w = g.weather;

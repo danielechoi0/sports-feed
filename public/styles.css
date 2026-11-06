@@ -564,3 +564,55 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .modal-card { padding: 18px 14px 22px; }
   .mhead .mteam { font-size: 20px; }
 }
+
+/* ---------- soccer shot simulator ---------- */
+.sim .sim-controls { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin: 4px 0 14px; }
+.sim .sim-controls label { display: flex; flex-direction: column; gap: 4px; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.sim .sel, .sim .inp {
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 7px 10px; min-height: 36px;
+}
+.sim .inp { width: 84px; }
+.sim .sel { min-width: 120px; }
+.sim .btn.small { min-height: 32px; padding: 4px 10px; font-size: 12px; margin-top: 8px; }
+.sim-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.tile-stat { background: var(--board); color: #fff; border-radius: 10px; padding: 10px 12px; }
+.tile-stat .k { font-family: var(--mono); font-size: 11px; color: var(--board-dim); display: flex; align-items: center; gap: 6px; }
+.tile-stat .k img { width: 16px; height: 16px; object-fit: contain; }
+.tile-stat .v { font-family: var(--mono); font-weight: 700; font-size: 30px; line-height: 1.15; color: var(--accent); }
+.tile-stat .s { font-family: var(--mono); font-size: 11px; color: var(--board-dim); }
+.tile-stat.total .v { color: #fff; }
+.sim-hist { margin: 4px 0 14px; }
+.sim-hist .hlabel { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+.sim-hist .hbars { display: flex; align-items: flex-end; gap: 2px; height: 90px; border-bottom: 1px solid var(--border); padding-bottom: 16px; position: relative; }
+.sim-hist .hbar { flex: 1 1 0; min-width: 6px; background: color-mix(in srgb, var(--muted) 45%, transparent); border-radius: 2px 2px 0 0; position: relative; min-height: 1px; }
+.sim-hist .hbar.ge { background: var(--accent); }
+.sim-hist .hbar span { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 9px; color: var(--muted); margin-top: 2px; }
+.sim-hist .hbar:nth-child(even) span { display: none; }
+.sim-lineups { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-bottom: 8px; }
+.sim-team h4 { margin: 0 0 8px; font-family: var(--display); font-size: 15px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; display: flex; align-items: center; gap: 8px; }
+.sim-team h4 img { width: 18px; height: 18px; object-fit: contain; }
+.sim-team h4 .right { margin-left: auto; font-family: var(--mono); font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--muted); }
+.sim-team .subhead { margin: 8px 0 4px; }
+.chips-wrap { display: flex; flex-wrap: wrap; gap: 6px; }
+.pchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--ui); font-size: 12px; font-weight: 500; color: var(--text);
+  background: var(--surface); border: 1px solid var(--border); border-radius: 999px; padding: 4px 10px; cursor: pointer; line-height: 1.2;
+}
+.pchip:hover { border-color: color-mix(in srgb, var(--text) 40%, transparent); }
+.pchip .pp { font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.pchip .pr { font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--text); background: var(--surface-2); border-radius: 999px; padding: 0 6px; }
+.pchip .pm { font-family: var(--mono); font-size: 10px; font-weight: 700; }
+.pchip.bench { color: var(--muted); background: transparent; }
+.pchip.off { text-decoration: line-through; color: var(--muted); border-style: dashed; }
+.pchip.off .pm { color: var(--bad); text-decoration: none; }
+.pchip.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, var(--surface)); }
+.pchip.on .pm { color: var(--text); }
+.pchip.gone { color: var(--muted); border-style: dotted; cursor: default; opacity: 0.7; }
+.gone-wrap { margin-top: 6px; }
+.sim-table { margin-top: 10px; }
+.fi { font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
+.fi.hot { background: var(--good-bg); color: var(--good); }
+.fi.cold { background: var(--bad-bg); color: var(--bad); }
+.sim-foot { font-size: 12px; margin-top: 12px; }
