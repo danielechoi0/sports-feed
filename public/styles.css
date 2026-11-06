@@ -469,6 +469,11 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .flag { font-family: var(--mono); font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; margin-left: 6px; }
 .flag.off { background: var(--bad-bg); color: var(--bad); }
 .flag.on { background: var(--good-bg); color: var(--good); }
+.flag.sentoff { background: #e53935; color: #fff; text-transform: uppercase; letter-spacing: 0.04em; }
+.box tr.off td, .plist li.off { opacity: 0.6; }
+.box tr.off td.pname { text-decoration: line-through; text-decoration-color: var(--muted); }
+.box tr.off td.pname .flag { text-decoration: none; display: inline-block; }
+.men { display: inline-block; margin-right: 8px; padding: 1px 6px; border-radius: 4px; background: #e53935; color: #fff; font-family: var(--mono); font-size: 11px; font-weight: 700; text-transform: uppercase; }
 
 /* team comparison */
 .cmp-head { display: flex; justify-content: space-between; font-family: var(--display); font-weight: 700; font-size: 18px; text-transform: uppercase; margin-bottom: 8px; }

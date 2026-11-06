@@ -517,15 +517,29 @@
   const SOCCER_COLS = ['G', 'A', 'SH', 'SOT', 'SV'];
   function soccerRow(p, showStats, sub) {
     const s = p.stats || {};
-    const cards = `${s.YC ? '<span class="cardi yc" title="Yellow card"></span>' : ''}${s.RC ? '<span class="cardi rc" title="Red card"></span>' : ''}`;
-    const flags = `${p.subbedOut ? '<span class="flag off" title="Substituted off">off</span>' : ''}${p.subbedIn ? '<span class="flag on" title="Substituted on">on</span>' : ''}`;
+    const yellow = s.YC || (p.secondYellow && p.sentOff);
+    const cards = `${yellow ? `<span class="cardi yc" title="Yellow card${p.yellowAt ? ` ${esc(p.yellowAt)}` : ''}"></span>` : ''}${s.RC || p.sentOff ? `<span class="cardi rc" title="Red card${p.sentOff ? ` ${esc(p.sentOff)}` : ''}"></span>` : ''}`;
+    const min = (m) => (m ? ` ${esc(m)}` : '');
+    const flags = p.sentOff
+      ? `<span class="flag sentoff" title="${p.secondYellow ? 'Sent off, second yellow' : 'Sent off, straight red'}">sent off${min(p.sentOff)}</span>`
+      : `${p.subbedOut ? `<span class="flag off" title="Substituted off">off${min(p.subbedOutAt)}</span>` : ''}${p.subbedIn ? `<span class="flag on" title="Substituted on">on${min(p.subbedInAt)}</span>` : ''}`;
     const cells = showStats ? SOCCER_COLS.map((k) => `<td class="${s[k] ? 'hi' : ''}">${s[k] ?? 0}</td>`).join('') : '';
-    return `<tr class="${sub ? 'sub' : ''}"><td class="num">${esc(p.jersey || '')}</td><td class="pname">${esc(p.name)}${cards}${flags}</td><td class="pos">${esc(p.pos || '')}</td>${cells}</tr>`;
+    const cls = [sub ? 'sub' : '', p.sentOff ? 'off' : ''].filter(Boolean).join(' ');
+    return `<tr class="${cls}"><td class="num">${esc(p.jersey || '')}</td><td class="pname">${esc(p.name)}${cards}${flags}</td><td class="pos">${esc(p.pos || '')}</td>${cells}</tr>`;
+  }
+
+  // Players currently on the pitch after reds and substitutions.
+  function menOnPitch(l) {
+    const all = l.starters.concat(l.subs || []);
+    return all.filter((p) => (p.starter || p.subbedIn) && !p.subbedOut && !p.sentOff).length;
   }
 
   function lineupPanel(l, title, showStats = false) {
     const anyStats = l.starters.concat(l.subs || []).some((p) => p.stats);
     showStats = showStats && anyStats;
+    const reds = l.starters.concat(l.subs || []).filter((p) => p.sentOff);
+    const men = menOnPitch(l);
+    const menNote = reds.length && men < 11 ? `<span class="men" title="${esc(reds.map((p) => `${p.name} ${p.sentOff}`).join(', '))}">${men} men</span>` : '';
     const head = `<thead><tr><th></th><th>Player</th><th></th>${showStats ? SOCCER_COLS.map((c) => `<th title="${c === 'G' ? 'Goals' : c === 'A' ? 'Assists' : c === 'SH' ? 'Shots' : c === 'SOT' ? 'Shots on target' : 'Saves'}">${c}</th>`).join('') : ''}</tr></thead>`;
     const starters = l.starters.map((p) => soccerRow(p, showStats, false)).join('');
     const usedSubs = (l.subs || []).filter((p) => p.subbedIn);
@@ -534,7 +548,7 @@
     const bench = unused.length
       ? `<details><summary>Unused substitutes (${unused.length})</summary><table class="box">${unused.map((p) => soccerRow(p, false, true)).join('')}</table></details>`
       : '';
-    return `<div class="panel"><h3>${img(l.team.logo, l.team.name)} ${esc(l.team.name)}${l.formation ? `<span class="right">${esc(l.formation)}</span>` : ''}</h3>
+    return `<div class="panel"><h3>${img(l.team.logo, l.team.name)} ${esc(l.team.name)}<span class="right">${menNote}${l.formation ? esc(l.formation) : ''}</span></h3>
       ${title ? `<p class="note" style="margin:0 0 8px">${title}</p>` : ''}
       <div class="scroll"><table class="box">${head}<tbody>${starters}${subsRows}</tbody></table></div>${bench}</div>`;
   }
@@ -577,7 +591,7 @@
     }
     if (limit) list = list.slice(0, limit);
     return `<div class="scroll"><table class="box"><thead><tr><th>Player</th>${cols.map((c) => `<th title="${esc(c.d)}">${esc(c.l)}</th>`).join('')}</tr></thead><tbody>${list
-      .map((r) => `<tr class="${r.cls || ''}"><td class="pname">${esc(r.name)}${r.pos ? `<span class="pos">${esc(r.pos)}</span>` : ''}</td>${cols.map((c) => `<td>${esc(r.stats[c.i] ?? '')}</td>`).join('')}</tr>`)
+      .map((r) => `<tr class="${r.cls || ''}${r.ejected ? ' off' : ''}"><td class="pname">${esc(r.name)}${r.pos ? `<span class="pos">${esc(r.pos)}</span>` : ''}${r.ejected ? '<span class="flag sentoff" title="Ejected from the game">ejected</span>' : ''}</td>${cols.map((c) => `<td>${esc(r.stats[c.i] ?? '')}</td>`).join('')}</tr>`)
       .join('')}</tbody></table></div>`;
   }
 
@@ -779,6 +793,7 @@
   function nbaPlayerLi(p, opts = {}) {
     const stat = p.dnp ? `<span class="stat">DNP${p.reason ? ` · ${esc(p.reason.toLowerCase())}` : ''}</span>` : p.min != null ? `<span class="stat">${esc(p.min)} min · ${esc(p.pts ?? 0)} pts</span>` : '';
     const inj = p.injury ? `<span class="st ${statusClass(p.injury.status)}" title="${esc(p.injury.type || '')}">${esc(p.injury.status)}</span>` : '';
+    if (p.ejected) return `<li class="${opts.sub ? 'sub' : ''} off"><span class="num">${esc(p.jersey || '')}</span><span class="pname">${esc(p.name)} <span class="pos">${esc(p.pos || '')}</span><span class="flag sentoff" title="Ejected from the game">ejected</span></span><span>${stat}</span></li>`;
     return `<li class="${opts.sub ? 'sub' : ''}"><span class="num">${esc(p.jersey || '')}</span><span class="pname">${esc(p.name)} <span class="pos">${esc(p.pos || '')}</span></span><span>${stat}${inj}</span></li>`;
   }
 
