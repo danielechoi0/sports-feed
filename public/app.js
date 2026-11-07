@@ -1242,6 +1242,34 @@
     return `<div class="panel"><h3>${img(t.logo, t.name)} ${esc(t.name)} <span class="right">box score</span></h3>${blocks}</div>`;
   }
 
+  function depthPlayer(p, starter) {
+    if (!p) return '<td class="dc-empty">–</td>';
+    const inj = p.injury ? ` <span class="st ${statusClass(p.injury.status)}" title="${esc(p.injury.detail || '')}">${esc(p.injury.status.slice(0, 1))}</span>` : '';
+    const short = esc(p.short || p.name);
+    const name = starter ? `<span class="dc-full">${esc(p.name)}</span><span class="dc-short">${short}</span>` : short;
+    return `<td class="${starter ? 'dc-starter' : 'dc-backup'}" title="${esc(p.name)}${p.injury ? ` – ${esc(p.injury.status)}` : ''}"><div class="dc-cell"><span class="dc-n">${name}</span>${inj}</div></td>`;
+  }
+
+  function depthTable(rows) {
+    const body = rows
+      .map((r) => `<tr><th title="${esc(r.name || '')}">${esc(r.pos)}</th>${[0, 1, 2].map((i) => depthPlayer(r.players[i], i === 0)).join('')}</tr>`)
+      .join('');
+    return `<table class="depth"><thead><tr><th></th><th>Starter</th><th>2nd</th><th>3rd</th></tr></thead><tbody>${body}</tbody></table>`;
+  }
+
+  function depthPanel(team, dc) {
+    const head = `<h3>${img(team.logo, team.name)} ${esc(team.name)} <span class="right">depth chart</span></h3>`;
+    if (!dc || dc.error || (!dc.offense?.length && !dc.defense?.length)) {
+      return `<div class="panel">${head}<p class="note" style="margin:0">${esc(dc?.error ? `Depth chart unavailable: ${dc.error}` : 'No depth chart published.')}</p></div>`;
+    }
+    const sub = (title, f) => `<div class="subhead">${esc(title)}${f ? ` <span class="dc-form">${esc(f)}</span>` : ''}</div>`;
+    return `<div class="panel">${head}
+      ${dc.offense.length ? sub('Offense', dc.formation) + depthTable(dc.offense) : ''}
+      ${dc.defense.length ? sub('Defense', dc.defenseFormation) + depthTable(dc.defense) : ''}
+      ${dc.special.length ? `<details><summary>Special teams</summary>${depthTable(dc.special)}</details>` : ''}
+      <p class="note">Projected starters from ESPN's depth chart; actual starters can change at kickoff.</p></div>`;
+  }
+
   function detailNfl(g, d) {
     const teams = [g.away, g.home];
     const parts = [];
@@ -1251,6 +1279,7 @@
       for (const t of teams) parts.push(nflBoxPanel(t, d.players));
     }
     if (window.KalshiMarket) parts.push(window.KalshiMarket.panel(g)); // public/kalshi.js
+    for (const t of teams) parts.push(depthPanel(t, d.depth?.find((x) => String(x.teamId) === String(t.id))));
     for (const t of teams) parts.push(rankPanel(t, d.rankings?.teams?.[String(t.id)], meta));
     for (const t of teams) {
       const inj = d.injuries?.find((x) => String(x.team.id) === String(t.id));

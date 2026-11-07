@@ -661,3 +661,24 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .kx .kx-lean .pp { display: block; margin-left: 0; }
 }
 /* ==== end Market read (Kalshi) ==== */
+
+/* ==== NFL depth chart ==== */
+.depth { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
+.depth th, .depth td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.depth thead th { font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted); }
+.depth thead th:first-child, .depth tbody th { width: 44px; }
+.depth tbody th { font-family: var(--mono); font-size: 12px; color: var(--muted); font-weight: 700; }
+.depth .dc-starter { color: var(--text); font-weight: 600; width: 40%; }
+.depth .dc-backup, .depth .dc-empty { color: var(--muted); }
+.depth .st { padding: 0 4px; font-size: 10px; }
+.dc-form { font-family: var(--mono); font-size: 11px; text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 6px; }
+.depth .dc-cell { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.depth .dc-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.depth .dc-cell .st { flex: none; }
+.depth .dc-short { display: none; }
+@media (max-width: 560px) {
+  .depth .dc-full { display: none; }
+  .depth .dc-short { display: inline; }
+  .depth .dc-starter { width: auto; }
+}
+/* ==== end NFL depth chart ==== */

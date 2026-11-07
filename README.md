@@ -45,7 +45,9 @@ trails the broadcast by 10 to 30 seconds.
 - **NFL** – once the game starts: team stats comparison (yards, first downs,
   third down, turnovers, penalties, possession) and the full box score per
   team (passing, rushing, receiving; defense, kicking, returns and punting
-  collapsed). Always: each team's league rank for pass/rush offense and
+  collapsed). Always: each team's depth chart (offense and defense three
+  deep with the projected starter first and injury tags, special teams
+  collapsed; from ESPN, so starters can still change at kickoff), each team's league rank for pass/rush offense and
   defense (yards per game from every completed regular-season game), the
   injury report, and weather.
 - **NBA** – once tipped: team stats comparison and a full box score per team

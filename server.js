@@ -21,6 +21,7 @@ import {
   nbaBoxLineups,
   teamRoster,
   normalizeRoster,
+  nflDepthChart,
 } from './lib/espn.js';
 import { venueWeather } from './lib/weather.js';
 import { buildShotModel } from './lib/shotModel.js';
@@ -311,9 +312,17 @@ async function nflDetail(id) {
   } catch (e) {
     rankings = { error: e.message };
   }
+  const depth = await Promise.all(
+    teams.map((t) =>
+      nflDepthChart(t.id)
+        .then((dc) => ({ teamId: t.id, ...dc }))
+        .catch((e) => ({ teamId: t.id, error: e.message })),
+    ),
+  );
   const w = s.gameInfo?.weather;
   return {
     teams,
+    depth,
     injuries: injuries(s),
     rankings,
     players: nflBoxPlayers(s),
