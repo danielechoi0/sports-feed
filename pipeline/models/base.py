@@ -66,6 +66,7 @@ def player_position(row, history, date):
 
 class Model:
     name = "base"
+    pooled = False  # True: one fit across competitions (evaluate fits the others per competition)
 
     def fit(self, train_matches, history):
         return self

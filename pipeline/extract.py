@@ -1,8 +1,9 @@
 """Turn raw ESPN match summaries into flat tables.
 
-    python -m pipeline.extract
+    python -m pipeline.extract                 # every configured competition
+    python -m pipeline.extract --leagues esp.1
 
-Writes data/tables/{matches,appearances,shots,events}.csv.gz:
+Writes data/tables/<league>/{matches,appearances,shots,events}.csv.gz:
   matches      one row per match: teams, score, team shots/SOT/possession,
                formations, shots counted from commentary (for the check)
   appearances  one row per player who played: minutes on/off, shots, SOT,
@@ -13,6 +14,7 @@ Writes data/tables/{matches,appearances,shots,events}.csv.gz:
 Match minutes are "base + added time" (45'+2' -> 47), which is close enough
 for minute-level rates.
 """
+import argparse
 import gzip
 import json
 import re
@@ -163,6 +165,11 @@ def extract_match(league, d):
 
     commentary = d.get("commentary") or []
     end_min = max([minute((x.get("time") or {}).get("displayValue")) or 0 for x in commentary] + [90])
+    # Knockout games can go to extra time (periods 3-4) and penalties (5).
+    # The backtest predicts regulation time, so keep where it ended.
+    periods = [((x.get("play") or {}).get("period") or {}).get("number") for x in commentary]
+    max_period = max([p for p in periods if p] + [2])
+    end_min_reg = max([minute((x.get("time") or {}).get("displayValue")) or 0 for x, p in zip(commentary, periods) if p in (1, 2)] + [90])
 
     # Appearances.
     apps = []
@@ -270,8 +277,8 @@ def extract_match(league, d):
             kind = "red"
         elif low == "substitution":
             kind = "sub"
-        if kind and tid in teams:
-            events.append({"match_id": eid, "team_id": tid, "minute": m, "kind": kind, "type_text": ttext})
+        if kind and tid in teams and not k.get("shootout"):
+            events.append({"match_id": eid, "team_id": tid, "minute": m, "period": (k.get("period") or {}).get("number"), "kind": kind, "type_text": ttext})
 
     shot_count = Counter(s["team_id"] for s in shots)
     match = {
@@ -294,6 +301,12 @@ def extract_match(league, d):
         "home_formation": formations.get(home_id),
         "away_formation": formations.get(away_id),
         "end_min": end_min,
+        "end_min_reg": end_min_reg,
+        "max_period": max_period,
+        # "2024-25 UEFA Champions League, Knockout Round Playoffs" -> stage
+        "stage": (hdr.get("season", {}).get("name") or "").partition(", ")[2] or "League",
+        "leg": (comp.get("leg") or {}).get("value") if isinstance(comp.get("leg"), dict) else comp.get("leg"),
+        "neutral": bool(comp.get("neutralSite")),
         "home_shots_comm": shot_count.get(home_id, 0),
         "away_shots_comm": shot_count.get(away_id, 0),
         "n_commentary": len(commentary),
@@ -302,9 +315,18 @@ def extract_match(league, d):
 
 
 def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--leagues", nargs="*", default=LEAGUES)
+    args = ap.parse_args()
+    for league in args.leagues:
+        extract_league(league)
+
+
+def extract_league(league):
+    """One folder of tables per competition: data/tables/<league>/*.csv.gz."""
     rows = {"matches": [], "appearances": [], "shots": [], "events": []}
     bad = 0
-    for league in LEAGUES:
+    if True:
         for path in sorted((RAW / league).glob("*.json.gz")):
             with gzip.open(path, "rt") as f:
                 d = json.load(f)
@@ -322,12 +344,13 @@ def main():
             rows["appearances"] += a
             rows["shots"] += s
             rows["events"] += e
-    TABLES.mkdir(parents=True, exist_ok=True)
+    out = TABLES / league
+    out.mkdir(parents=True, exist_ok=True)
     for name, r in rows.items():
-        pd.DataFrame(r).to_csv(TABLES / f"{name}.csv.gz", index=False)
-        print(f"{name}: {len(r)} rows")
+        pd.DataFrame(r).to_csv(out / f"{name}.csv.gz", index=False)
+        print(f"{league} {name}: {len(r)} rows")
     if bad:
-        print(f"skipped {bad} matches")
+        print(f"{league}: skipped {bad} matches")
 
 
 if __name__ == "__main__":
