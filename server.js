@@ -15,6 +15,7 @@ import {
   lastFive,
   soccerLineups,
   soccerKeyEvents,
+  soccerHalftimeAt,
   teamStats,
   nflBoxPlayers,
   injuries,
@@ -292,6 +293,7 @@ async function soccerDetail(slug, id) {
     lineups: lineupsAvailable ? lineups : [],
     previousLineups,
     keyEvents: soccerKeyEvents(s),
+    halftimeAt: soccerHalftimeAt(s),
     teamStats: teamStats(s),
     last5: teams.map((t) => ({ teamId: t.id, games: lastFive(s, t.id) })),
   };

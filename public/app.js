@@ -18,6 +18,8 @@
     pollTimer: null,
     modalId: null,
     modalTimer: null,
+    tickTimer: null,
+    halftimeAt: new Map(), // soccer game id -> halftime whistle ISO (from detail)
   };
   if (!['all', 'nfl', 'nba', 'soccer'].includes(state.sportTab)) state.sportTab = 'all';
 
@@ -491,12 +493,39 @@
     stopModalRefresh();
   }
 
+  // Soccer halftime: count down to the expected restart (whistle + 15 min).
+  const HALFTIME_MS = 15 * 60_000;
+  function isSoccerHalftime(g) {
+    const s = g.status;
+    return g.sport === 'soccer' && s.state === 'in' && s.period === 1 && /halftime/i.test(s.description || '');
+  }
+  function restartText(restartMs) {
+    const left = Math.round((restartMs - Date.now()) / 1000);
+    if (left <= 0) return '2nd half starting soon';
+    return `2nd half in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  }
+  function halftimeHtml(g) {
+    const at = state.halftimeAt.get(g.id);
+    if (!isSoccerHalftime(g) || !at) return '';
+    const whistle = new Date(at).getTime();
+    if (!Number.isFinite(whistle)) return '';
+    const restart = whistle + HALFTIME_MS;
+    const title = `Estimate: halftime whistle at ${timeFmt.format(new Date(whistle))} + 15 min`;
+    return `<span class="ht-countdown" data-restart="${restart}" title="${esc(title)}">${esc(restartText(restart))}</span>`;
+  }
+  function tickHalftime() {
+    el.modalBody.querySelectorAll('[data-restart]').forEach((n) => {
+      n.textContent = restartText(Number(n.dataset.restart));
+    });
+  }
+
   function modalHead(g) {
     const [left, right] = teamsInOrder(g);
     const score = (t) => (g.status.state === 'pre' ? '' : `<span class="mscore">${esc(t.score ?? '')}</span>`);
     const sep = g.sport === 'soccer' ? 'vs' : '@';
     const sub = [
       statusHtml(g),
+      halftimeHtml(g),
       g.venue.name ? `<span>${esc(venueText(g))}</span>` : '',
       g.broadcast ? `<span>${esc(g.broadcast)}</span>` : '',
       g.odds ? `<span class="spread">${esc(g.odds)}</span>` : '',
@@ -522,10 +551,13 @@
       if (cur.status.state === 'in' || (cur.status.state === 'pre' && soon)) refreshModalBody(id);
       if (cur.status.state === 'post') stopModalRefresh();
     }, 10_000);
+    state.tickTimer = setInterval(tickHalftime, 1000);
   }
   function stopModalRefresh() {
     clearInterval(state.modalTimer);
+    clearInterval(state.tickTimer);
     state.modalTimer = null;
+    state.tickTimer = null;
     state.modalId = null;
   }
   async function refreshModalBody(id) {
@@ -536,6 +568,7 @@
       if (!res.ok) return;
       const detail = await res.json();
       if (state.modalId !== id || el.modal.classList.contains('hidden')) return;
+      if (detail.halftimeAt) state.halftimeAt.set(g.id, detail.halftimeAt);
       if (g.sport === 'soccer' && sim.data && sim.gameId === id) await loadSim(g, { silent: true });
       const body = g.sport === 'soccer' ? detailSoccer(g, detail) : g.sport === 'nfl' ? detailNfl(g, detail) : detailNba(g, detail);
       const open = [...el.modalBody.querySelectorAll('details')].map((d) => d.open);
@@ -559,6 +592,7 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const detail = await res.json();
       if (el.modal.classList.contains('hidden')) return;
+      if (detail.halftimeAt) state.halftimeAt.set(g.id, detail.halftimeAt);
       const body = g.sport === 'soccer' ? detailSoccer(g, detail) : g.sport === 'nfl' ? detailNfl(g, detail) : detailNba(g, detail);
       el.modalBody.innerHTML = modalHead(g) + body;
       startModalRefresh(g.id);

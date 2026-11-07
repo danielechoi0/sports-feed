@@ -616,3 +616,4 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .fi.hot { background: var(--good-bg); color: var(--good); }
 .fi.cold { background: var(--bad-bg); color: var(--bad); }
 .sim-foot { font-size: 12px; margin-top: 12px; }
+.ht-countdown { font-family: var(--mono); font-weight: 700; color: var(--text); white-space: nowrap; }
