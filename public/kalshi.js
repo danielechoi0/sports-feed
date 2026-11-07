@@ -58,11 +58,30 @@
     return `${head(updated)}
       <div class="kx-headline">${esc(s.headline)}</div>
       ${s.tags?.length ? `<div class="kx-tags">${s.tags.map((t) => `<span class="kx-tag">${esc(t)}</span>`).join('')}${d.live ? '<span class="kx-tag live">in-play prices</span>' : ''}</div>` : ''}
+      ${glance(d.glance)}
       <div class="kx-narr">${s.narrative.map((p) => `<p>${esc(p)}</p>`).join('')}</div>
       ${keys(s.keyNumbers)}
       ${tilt(s.teamTilt)}
       ${players(d)}
       <p class="note kx-foot">${esc(s.method)} ${hit.error ? `Last refresh failed (${esc(hit.error)}); showing earlier prices. ` : ''}<strong>Prices from Kalshi, not betting advice.</strong></p>`;
+  }
+
+  const GL = { more: ['▲', 'More than normal'], normal: ['●', 'Normal'], less: ['▼', 'Less than normal'] };
+  const GL_SHORT = { more: '▲', normal: '●', less: '▼' };
+  const fmtN = (x) => (x == null ? '–' : Number.isInteger(x) || Math.abs(x) >= 20 ? String(Math.round(x)) : x.toFixed(1));
+
+  function glance(items) {
+    if (!items?.length) return '';
+    return `<div class="kx-glance" role="list">${items
+      .map((it) => {
+        const [icon, text] = GL[it.level] || ['–', 'No read'];
+        const nums = it.level ? `${fmtN(it.market)} vs ${fmtN(it.normal)} ${esc(it.unit)} normal` : esc(it.missing || '');
+        const teams = it.teams
+          .map((t) => `<span class="${esc(t.level || '')}" title="${esc(`${t.team}: ${fmtN(t.market)} vs ${fmtN(t.normal)} normal${t.basis ? ` (${t.basis})` : ''}`)}">${esc(t.team)} ${GL_SHORT[t.level] || '–'}</span>`)
+          .join('');
+        return `<div class="kx-g ${it.level || 'na'}" role="listitem" title="${esc(it.note || '')}"><div class="k">${esc(it.label)}</div><div class="lv"><i aria-hidden="true">${icon}</i>${esc(text)}</div><div class="nums">${nums}</div><div class="tm">${teams}</div></div>`;
+      })
+      .join('')}</div>`;
   }
 
   function keys(list) {

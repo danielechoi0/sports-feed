@@ -71,7 +71,12 @@ more/less scoring than usual), and each team's pass share of priced yards (QB
 line vs the listed rushers' lines) vs the same players' season split (±5 points
 = throwing or running more than usual). Spread and win probability use fixed
 cut-offs (lopsided at 9.5+ points or 80%, coin flip within 3).
-The panel shows the headline, a short narrative, key numbers, per-team pass/run
+An "at a glance" strip opens the panel: passing yards, rushing yards,
+scoring and field goals, each marked more than normal / normal / less than
+normal for the game (and per team), where normal is the same players' and
+teams' season averages (field goals: made per game, averaged with what the
+opponent allows; Kalshi's field-goal ladders are often barely traded, so that
+tile only reads when the prices are real). The panel shows the headline, a short narrative, key numbers, per-team pass/run
 tilt bars and every player line by position. Missing markets are named rather
 than filled in, games without markets say so, and in-play prices are flagged.
 It is a hypothesis about what bettors are saying, not advice. Prices are cached
