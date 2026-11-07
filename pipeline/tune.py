@@ -39,7 +39,7 @@ def objective(params, train, dev, history):
 
 
 def main():
-    matches = load_matches()
+    matches = load_matches(["eng.1"])  # tuned on the Premier League (the original setup)
     history = History(matches)
     train = [m for m in matches if m.ok and split_of(m.season) == "train"]
     dev = [m for m in matches if m.ok and split_of(m.season) == "dev"]

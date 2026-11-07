@@ -50,7 +50,10 @@ def list_matches(league, refresh=False):
                 continue
             if not e.get("status", {}).get("type", {}).get("completed"):
                 continue
-            seen[e["id"]] = {"id": e["id"], "date": e["date"], "season": season}
+            # Cup competitions (UCL, UEL) are keyed by the season's starting year
+            # like the leagues: group/league phase in the autumn, knockouts in
+            # the next calendar year, all under the same season.year.
+            seen[e["id"]] = {"id": e["id"], "date": e["date"], "season": season, "stage": (e.get("season") or {}).get("slug")}
     out = sorted(seen.values(), key=lambda x: x["date"])
     index.parent.mkdir(parents=True, exist_ok=True)
     index.write_text(json.dumps(out))
@@ -73,8 +76,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--refresh", action="store_true", help="re-list matches")
     ap.add_argument("--workers", type=int, default=6)
+    ap.add_argument("--leagues", nargs="*", default=LEAGUES)
     args = ap.parse_args()
-    for league in LEAGUES:
+    for league in args.leagues:
         matches = list_matches(league, args.refresh)
         by_season = {}
         for m in matches:

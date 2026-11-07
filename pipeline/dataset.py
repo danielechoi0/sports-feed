@@ -16,14 +16,20 @@ from dataclasses import dataclass, field
 
 import pandas as pd
 
-from .config import SEASONS, TABLES
+from .config import CUPS, LEAGUES, SEASONS, TABLES
 
 CHECKPOINTS = (0, 15, 30, 45, 60, 75)
 MAX_SHOTS = 60  # support of the team-shot distributions
 
 
-def _read(name, **kw):
-    return pd.read_csv(TABLES / f"{name}.csv.gz", **kw)
+def _read(name, leagues, **kw):
+    """One table across competitions (data/tables/<league>/<name>.csv.gz)."""
+    frames = [pd.read_csv(TABLES / lg / f"{name}.csv.gz", **kw) for lg in leagues]
+    return pd.concat(frames, ignore_index=True) if len(frames) > 1 else frames[0]
+
+
+def available_leagues():
+    return [lg for lg in LEAGUES if (TABLES / lg / "matches.csv.gz").exists()]
 
 
 @dataclass
@@ -51,6 +57,11 @@ class Match:
     goals: list  # (team_id, minute, period) incl. own goals, credited to the scoring side
     reds: list  # (team_id, minute)
     ok: bool  # passes the data-quality check
+    stage: str = "League"  # cups: "Group Stage", "League Phase", "Round of 16", ...
+    knockout: bool = False
+    leg: int | None = None  # 1 or 2 for two-legged ties
+    neutral: bool = False
+    extra_time: bool = False  # went beyond 90 minutes (only regulation time is predicted)
 
     def team(self, tid):
         return self.home if self.home.team_id == tid else self.away
@@ -73,11 +84,19 @@ def before(minute, period, t):
     return minute <= t
 
 
-def load_matches():
-    m = _read("matches", dtype={"match_id": str, "home_id": str, "away_id": str})
-    a = _read("appearances", dtype={"match_id": str, "team_id": str, "opp_id": str, "player_id": str})
-    s = _read("shots", dtype={"match_id": str, "team_id": str, "player_id": str})
-    e = _read("events", dtype={"match_id": str, "team_id": str})
+def load_matches(leagues=None):
+    """Matches of the given competitions (default: every extracted one), by date.
+
+    Knockout games that went to extra time are cut at the end of regulation
+    time: shots, goals and cards after 90 minutes are dropped and end_min is
+    where the second half ended. The data check still compares every shot
+    before the shoot-out with the player box scores (which include extra time).
+    """
+    leagues = leagues or available_leagues()
+    m = _read("matches", leagues, dtype={"match_id": str, "home_id": str, "away_id": str})
+    a = _read("appearances", leagues, dtype={"match_id": str, "team_id": str, "opp_id": str, "player_id": str})
+    s = _read("shots", leagues, dtype={"match_id": str, "team_id": str, "player_id": str})
+    e = _read("events", leagues, dtype={"match_id": str, "team_id": str})
     apps = defaultdict(lambda: defaultdict(dict))
     for r in a.to_dict("records"):
         apps[r["match_id"]][r["team_id"]][r["player_id"]] = r
@@ -91,7 +110,9 @@ def load_matches():
     out = []
     for r in m.sort_values("date").to_dict("records"):
         mid = r["match_id"]
-        sh = shots[mid]
+        extra_time = int(r.get("max_period", 2) if pd.notna(r.get("max_period", 2)) else 2) > 2
+        all_sh = [x for x in shots[mid] if not (pd.notna(x["period"]) and x["period"] >= 5)]
+        sh = [x for x in all_sh if not (pd.notna(x["period"]) and x["period"] > 2)] if extra_time else all_sh
         tm = {}
         ok = True
         for side in ("home", "away"):
@@ -99,7 +120,7 @@ def load_matches():
             mine = [x for x in sh if x["team_id"] == tid]
             players = apps[mid][tid]
             box = sum(p["shots"] for p in players.values())
-            if abs(len(mine) - box) > 2:
+            if abs(sum(1 for x in all_sh if x["team_id"] == tid) - box) > 2:
                 ok = False
             tm[side] = TeamMatch(
                 team_id=tid,
@@ -116,21 +137,30 @@ def load_matches():
         for x in evs[mid]:
             if x["kind"] == "own_goal":
                 mn = x["minute"] if pd.notna(x["minute"]) else None
+                if extra_time and pd.notna(x.get("period")) and x["period"] > 2:
+                    continue
                 goals.append((x["team_id"], mn, 1 if mn is not None and mn <= 45 else 2))
         reds = [(x["team_id"], x["minute"]) for x in evs[mid] if x["kind"] == "red" and pd.notna(x["minute"])]
+        stage = r.get("stage") if isinstance(r.get("stage"), str) else "League"
+        leg = r.get("leg")
         out.append(
             Match(
                 match_id=mid,
                 league=r["league"],
                 season=int(r["season"]),
                 date=r["date"],
-                end_min=int(r["end_min"]),
+                end_min=int(r["end_min_reg"] if extra_time else r["end_min"]),
                 home=tm["home"],
                 away=tm["away"],
                 shots=sh,
                 goals=goals,
                 reds=reds,
                 ok=ok,
+                stage=stage,
+                knockout=r["league"] in CUPS and not any(k in stage for k in ("Group", "League Phase")),
+                leg=int(leg) if pd.notna(leg) else None,
+                neutral=bool(r.get("neutral", False)),
+                extra_time=extra_time,
             )
         )
     return out
@@ -214,6 +244,12 @@ class History:
         self._player_dates = {k: [x[0] for x in v] for k, v in self.player_games.items()}
         self._league = sorted(((m.date, m) for m in matches if m.ok), key=lambda x: x[0])
         self._league_dates = [d for d, _ in self._league]
+        # per competition, for league reference rates
+        self._by_league = defaultdict(list)
+        for d, m in self._league:
+            self._by_league[m.league].append((d, m))
+        self._by_league_dates = {k: [d for d, _ in v] for k, v in self._by_league.items()}
+        self._views = {}
 
     def team_recent(self, team_id, date, n=10):
         """Most recent first."""
@@ -232,7 +268,35 @@ class History:
     def player_season(self, player_id, season, date):
         return [x for x in self.player_recent(player_id, date) if x[1] == season]
 
-    def league_games(self, date, season=None):
-        i = bisect_left(self._league_dates, date)
-        ms = [m for _, m in self._league[:i]]
+    def league_games(self, date, season=None, league=None):
+        """Matches before date (of one competition if league is given)."""
+        if league is None:
+            rows, dates = self._league, self._league_dates
+        else:
+            rows, dates = self._by_league.get(league, []), self._by_league_dates.get(league, [])
+        i = bisect_left(dates, date)
+        ms = [m for _, m in rows[:i]]
         return [m for m in ms if season is None or m.season == season]
+
+    def view(self, league):
+        """This history with league reference rates scoped to one competition.
+
+        Team and player lookups stay global (a club's league and European games
+        both feed its form); league_games() only returns that competition's
+        matches. Lets the single-competition models (league_avg, team_avg,
+        current, team_share*) run unchanged on any competition."""
+        if league not in self._views:
+            self._views[league] = LeagueView(self, league)
+        return self._views[league]
+
+
+class LeagueView:
+    def __init__(self, history, league):
+        self.base = history
+        self.league = league
+
+    def __getattr__(self, name):
+        return getattr(self.base, name)
+
+    def league_games(self, date, season=None, league=None):
+        return self.base.league_games(date, season, league or self.league)
