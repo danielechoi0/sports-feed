@@ -22,10 +22,12 @@ import {
   nbaBoxLineups,
   teamRoster,
   normalizeRoster,
+  nflDepthChart,
 } from './lib/espn.js';
 import { venueWeather } from './lib/weather.js';
 import { buildShotModel } from './lib/shotModel.js';
 import { getRankings, warmRankings } from './lib/nflStats.js';
+import { nflMarket } from './lib/kalshi.js';
 import { cached, pLimit, cacheStats } from './lib/cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -312,9 +314,17 @@ async function nflDetail(id) {
   } catch (e) {
     rankings = { error: e.message };
   }
+  const depth = await Promise.all(
+    teams.map((t) =>
+      nflDepthChart(t.id)
+        .then((dc) => ({ teamId: t.id, ...dc }))
+        .catch((e) => ({ teamId: t.id, error: e.message })),
+    ),
+  );
   const w = s.gameInfo?.weather;
   return {
     teams,
+    depth,
     injuries: injuries(s),
     rankings,
     players: nflBoxPlayers(s),
@@ -392,6 +402,12 @@ export async function handle(req, res) {
   }
   if (pathname === '/api/nfl/rankings') {
     return sendJson(res, 200, await getRankings());
+  }
+  const km = pathname.match(/^\/api\/nfl\/(\d+)\/market$/);
+  if (km) {
+    // Kalshi prices -> implied lines + rule-based read (lib/kalshi.js).
+    const data = await cached(`kalshi:nflmarket:${km[1]}`, 60_000, () => nflMarket(km[1]));
+    return sendJson(res, 200, data);
   }
   if (pathname === '/api/live') {
     if (SERVERLESS) {

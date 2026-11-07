@@ -1,0 +1,162 @@
+{
+ "model": "team_share_ridge",
+ "league": "eng.1",
+ "description": "Team shots after minute t ~ negative binomial (log link, offset log league rate); each on-pitch player's shots ~ negative binomial around a share of the team mean; goals ~ shots x fitted conversion.",
+ "fitted": "2026-11-07T02:30:56+00:00",
+ "seasons_fitted": [
+  "2023/24",
+  "2024/25",
+  "2025/26"
+ ],
+ "fit_matches": 1120,
+ "checkpoints": [
+  0,
+  15,
+  30,
+  45,
+  60,
+  75
+ ],
+ "team": {
+  "cols": [
+   "t0",
+   "t15",
+   "t30",
+   "t45",
+   "t60",
+   "t75",
+   "log_att",
+   "log_opp_def",
+   "home",
+   "trail",
+   "lead",
+   "trail_late",
+   "lead_late",
+   "man_adv"
+  ],
+  "beta": {
+   "t0": -0.10356502417156177,
+   "t15": -0.23886586226038994,
+   "t30": -0.41855374650294525,
+   "t45": -0.7172391512170803,
+   "t60": -1.0472794806379297,
+   "t75": -1.5686894409484302,
+   "log_att": 0.9014252430534294,
+   "log_opp_def": 0.9141303167191765,
+   "home": 0.20986616900079488,
+   "trail": 0.11918380226169023,
+   "lead": -0.14658546950893805,
+   "trail_late": 0.07412085191068134,
+   "lead_late": -0.1210572997781991,
+   "man_adv": 0.5044730340471377
+  },
+  "k": 17.28965252562151,
+  "ridge": {
+   "man_adv": 50.0
+  }
+ },
+ "player": {
+  "cols": [
+   "t0",
+   "t15",
+   "t30",
+   "t45",
+   "t60",
+   "t75",
+   "log_share",
+   "pos_G",
+   "pos_D",
+   "pos_AM",
+   "pos_F"
+  ],
+  "beta": {
+   "t0": -0.6556980703286132,
+   "t15": -0.6782144085596186,
+   "t30": -0.7109935549557342,
+   "t45": -0.7429773937629804,
+   "t60": -0.7923320937535778,
+   "t75": -0.6631665479036993,
+   "log_share": 0.778414024286584,
+   "pos_G": -2.398712309310788,
+   "pos_D": -0.06996313297385187,
+   "pos_AM": 0.08398327729721389,
+   "pos_F": 0.1015551777148306
+  },
+  "k": 7.634784413547175,
+  "positions": [
+   "G",
+   "D",
+   "M",
+   "AM",
+   "F"
+  ],
+  "base_position": "M"
+ },
+ "goal": {
+  "intercept": -0.347905820865299,
+  "log_conv": 0.8204474028720415
+ },
+ "recency": {
+  "team_half_life": 20.0,
+  "team_n": 30,
+  "team_prior_games": 2.0,
+  "player_half_life": 25.0,
+  "player_n": 40,
+  "player_prior_min": 180.0,
+  "conv_prior_shots": 40.0,
+  "position_history_n": 30
+ },
+ "league_ref": {
+  "rate": 12.597368421052632,
+  "pos90": {
+   "G": 0.0012218797941811368,
+   "D": 0.5628167312403746,
+   "AM": 1.878854359204685,
+   "M": 1.003971557795729,
+   "F": 2.1947437235843226
+  },
+  "conv": {
+   "G": 0.0,
+   "D": 0.06857483601669648,
+   "AM": 0.10798510550268929,
+   "M": 0.08522440746343923,
+   "F": 0.14089775561097256
+  },
+  "conv_all": 0.10538959682473366,
+  "matches": 380,
+  "from": "2025-10-26T14:00Z",
+  "to": "2026-11-06T20:00Z"
+ },
+ "backtest": {
+  "split": "test",
+  "season": "2026/27",
+  "matches": 91,
+  "model": {
+   "team_nll": 2.582,
+   "team_rps": 1.941,
+   "team_mae": 2.72,
+   "bias": -0.52,
+   "cover80": 0.81,
+   "p1_logloss": 0.5153,
+   "p1_ece": 0.015,
+   "p2_logloss": 0.3281,
+   "p3_logloss": 0.1727,
+   "pgoal_logloss": 0.1899,
+   "pgoal_ece": 0.007
+  },
+  "previous_live_model": {
+   "team_nll": 2.916,
+   "team_rps": 2.255,
+   "team_mae": 2.99,
+   "bias": -1.71,
+   "cover80": 0.66,
+   "p1_logloss": 0.5312,
+   "p1_ece": 0.03,
+   "p2_logloss": 0.3454,
+   "p3_logloss": 0.1822,
+   "pgoal_logloss": 0.2039,
+   "pgoal_ece": 0.02
+  },
+  "source": "pipeline/reports/test-latest.md (fitted on 2023/24-2024/25 for that check)"
+ }
+}
