@@ -34,6 +34,11 @@ def minute(txt):
     return int(m.group(1)) + (int(m.group(2)) if m.group(2) else 0)
 
 
+def did_sub(v):
+    """ESPN sub flags: booleans in played matches, {"didSub": bool} pre-match."""
+    return v is True or (isinstance(v, dict) and v.get("didSub") is True)
+
+
 def pos_group(abbr):
     a = str(abbr or "").upper()
     if a in ("G", "GK"):
@@ -190,11 +195,11 @@ def extract_match(league, d):
             reds = [minute(x.get("clock", {}).get("displayValue")) for x in plays if x.get("redCard")]
             reds = [m for m in reds if m is not None]
             starter = bool(p.get("starter"))
-            on = 0 if starter else (subs[0] if p.get("subbedIn") and subs else None)
+            on = 0 if starter else (subs[0] if did_sub(p.get("subbedIn")) and subs else None)
             if on is None:
                 continue  # unused substitute
             off = end_min
-            if p.get("subbedOut"):
+            if did_sub(p.get("subbedOut")):
                 outs = subs if starter else subs[1:]
                 if outs:
                     off = outs[0]
