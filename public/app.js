@@ -1214,10 +1214,13 @@
     const lo = entries[0][0];
     const hi = entries[entries.length - 1][0];
     const bars = [];
+    // label every 2nd/5th/10th count so the axis stays readable on narrow screens
+    const span = hi - lo;
+    const step = span > 40 ? 10 : span > 16 ? 5 : 2;
     for (let k = lo; k <= hi; k++) {
       const n = histMap.get(k) || 0;
       const h = Math.round((n / max) * 100);
-      bars.push(`<div class="hbar ${k >= y ? 'ge' : ''}" style="height:${h}%" title="${k} shots: ${pct(n / SIM_RUNS)}"><span>${k}</span></div>`);
+      bars.push(`<div class="hbar ${k >= y ? 'ge' : ''}" style="height:${h}%" title="${k} shots: ${pct(n / SIM_RUNS)}">${k % step === 0 ? `<span>${k}</span>` : ''}</div>`);
     }
     return `<div class="sim-hist"><div class="hlabel">Distribution of total shots · mean ${num1(mean)} · shaded = at or above ${y}</div><div class="hbars">${bars.join('')}</div></div>`;
   }
