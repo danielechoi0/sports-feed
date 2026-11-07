@@ -11,7 +11,7 @@
 // 2. Monte Carlo: simulate scenarios with the browser's sampler and compare
 //    the simulated team totals and player marginals with NB(mu, k_team) and
 //    NB(lambda, k_player).
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { gunzipSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -45,7 +45,12 @@ function parseCsv(text) {
   const [head, ...body] = rows;
   return body.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
 }
-const table = (name) => parseCsv(gunzipSync(readFileSync(join(ROOT, 'data', 'tables', `${name}.csv.gz`))).toString('utf8'));
+// Tables are per competition (data/tables/eng.1/...); older checkouts had them flat.
+const tablePath = (name) => {
+  const nested = join(ROOT, 'data', 'tables', 'eng.1', `${name}.csv.gz`);
+  return existsSync(nested) ? nested : join(ROOT, 'data', 'tables', `${name}.csv.gz`);
+};
+const table = (name) => parseCsv(gunzipSync(readFileSync(tablePath(name))).toString('utf8'));
 const num = (x) => (x === '' || x == null ? 0 : Number(x));
 
 const mRows = table('matches').sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));

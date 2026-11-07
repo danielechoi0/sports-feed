@@ -118,7 +118,7 @@ def main():
     ap.add_argument("--parity-matches", type=int, default=20)
     args = ap.parse_args()
 
-    matches = load_matches()
+    matches = load_matches(["eng.1"])  # the shipped model is Premier League only
     history = History(matches)
     seasons = sorted(s for s, role in SEASONS.items() if role in FIT_ROLES)
     fit = [m for m in matches if m.ok and m.season in seasons and m.league == LEAGUE]
