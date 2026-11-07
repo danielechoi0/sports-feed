@@ -145,6 +145,35 @@ What differs from running locally:
   writable (`lib/cache.js` tries `CACHE_DIR`, then `.cache`, then the temp
   dir). Set `CACHE_DIR` to override the location anywhere.
 
+## Shot simulator
+
+The soccer modal's shot simulator (`/api/soccer/{league}/{id}/shotmodel`,
+Monte Carlo in the browser) uses two models:
+
+- **Premier League (`eng.1`): the fitted model** from the pipeline,
+  `team_share_ridge`, exported to `models/shot-eng.1.json` by
+  `python -m pipeline.export` (fitted on 2023/24–2025/26). On the sealed
+  2026/27 test it beat the original model on every score (80% ranges hit 81%
+  vs 66%; team-shots NLL 2.58 vs 2.92). The server (`lib/shotModel.js`,
+  `lib/teamShareFeatures.js`) builds the features from ESPN: each club's league
+  matches this season and last (commentary shot counts, as in the pipeline),
+  recency-weighted team shots for/against (last 30) and player shots per 90
+  and conversion (last 40 appearances). The browser (`public/teamShare.js`)
+  applies the coefficients. Scenario controls map onto the model: current
+  minute and minutes left interpolate the checkpoint intercepts (after 75' the
+  remaining shots fall linearly to zero at full time); score state sets the
+  trailing/leading features (the "late" versions ramp in from 45' to 60'); a
+  red card sets man advantage from its minute on; substitutions recompute the
+  on-pitch shares from their minute on; tempo stays a plain multiplier. Each
+  run draws a team frailty and per-player noise, matched so a team total is
+  NB(mu, k_team) and each player NB(lambda, k_player) (`node pipeline/parity.mjs`
+  checks this and the JS/Python parity). Approximations: league reference rates
+  are fixed at export; a player's matches for a previous club count only if
+  that club is one of the two in the match; shots on target are not modelled
+  (each player's recent ratio).
+- **Other leagues: the original hand-set model** (last 10 club matches incl.
+  cups, season totals, position priors).
+
 ## Shot model pipeline
 
 `pipeline/` holds the offline data, backtest and improvement loop for the

@@ -789,6 +789,8 @@
       const res = await fetch(`/api/soccer/${g.league.slug}/${g.id}/shotmodel`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
+      // Leagues with a fitted model (models/shot-<league>.json) are simulated by public/teamShare.js.
+      if (data.model && !sim.TS) sim.TS = await import('./teamShare.js');
       if (sim.gameId !== g.id) return;
       sim.data = data;
       if (!sim.scenario) sim.scenario = simDefaultScenario(data);
@@ -918,6 +920,7 @@
   function simCompute() {
     const d = sim.data;
     if (!d) return;
+    if (fittedModel(d)) return simComputeFitted();
     const sc = sim.scenario;
     const plan = simPlan(d, sc, sim.edits || {});
     const y = Math.max(0, Number(sc.threshold) || 0);
@@ -991,6 +994,119 @@
     };
   }
 
+  // ---- fitted model (Premier League) ----
+  // The server sends the exported coefficients (d.model) and each team's and
+  // player's features (t.ts, p.ts); public/teamShare.js turns the scenario into
+  // expected shots per player and runs the Monte Carlo so that each team total
+  // is NB(mu, k_team) and each player NB(lambda, k_player).
+  const fittedModel = (d) => !!(d.model && sim.TS && d.teams.every((t) => t.ts));
+
+  // A player's simulated interval [s, e] within [now, end] (s = null: does not play).
+  function simWindow(d, p, ed, now, end) {
+    let s = null;
+    let e = end;
+    const offAt = ed.off[p.id];
+    const onAt = ed.on[p.id];
+    if (p.onPitch) s = now;
+    else if (p.role === 'sub' && !p.subbedIn && onAt != null) s = Math.min(end, Math.max(now, onAt));
+    else if (!d.match.lineupsAnnounced && p.role === 'starter' && offAt == null) s = now;
+    if (s != null && offAt != null) e = Math.min(end, Math.max(s, offAt));
+    const minutes = s == null ? 0 : Math.max(0, e - s);
+    return { s: minutes > 0 ? s : null, e, minutes, activeAtEnd: s != null && e >= end && minutes > 0, edited: offAt != null ? 'off' : onAt != null ? 'on' : null };
+  }
+
+  function simPlanFitted(d, sc, edits) {
+    const TS = sim.TS;
+    const pre = d.match.state === 'pre';
+    const now = pre ? 0 : d.match.minute;
+    const end = now + Math.max(0, Number(sc.remaining) || 0);
+    const span = Math.max(0, end - now);
+    const [home, away] = [d.teams.find((t) => t.id === d.match.homeId), d.teams.find((t) => t.id === d.match.awayId)];
+    const teams = [home, away].filter(Boolean);
+    const plan = { now, end, span, teams: [], fitted: true };
+    for (const t of teams) {
+      const o = teams.find((x) => x.id !== t.id) || t;
+      const isHome = t.id === d.match.homeId;
+      const mine = isHome ? d.match.score.home : d.match.score.away;
+      const theirs = isHome ? d.match.score.away : d.match.score.home;
+      const st = sc.scoreState;
+      const diff = st === 'level' ? 0 : st === 'home' ? (isHome ? 1 : -1) : st === 'away' ? (isHome ? -1 : 1) : Math.sign(mine - theirs);
+      // Man advantage: red cards already shown, then the scenario's card from its minute on.
+      const reds = d.match.redCards || [];
+      const manAdv0 = Math.max(-1, Math.min(1, reds.filter((r) => r.teamId !== t.id).length - reds.filter((r) => r.teamId === t.id).length));
+      const scenarioReds = [];
+      if (sc.red !== 'none' && span > 0) {
+        const rm = Math.min(end, Math.max(now, Number(sc.redMinute) || now));
+        const redTeam = sc.red === 'home' ? d.match.homeId : d.match.awayId;
+        scenarioReds.push({ minute: rm, delta: redTeam === t.id ? -1 : 1 });
+      }
+      const ed = edits[t.id] || { off: {}, on: {} };
+      const wins = t.players.map((p) => simWindow(d, p, ed, now, end));
+      const units = t.players.map((p, i) => ({ id: p.id, group: p.ts?.group || 'M', r90: p.ts?.r90 ?? 1, pconv: p.ts?.pconv ?? 0.085, s: wins[i].s, e: wins[i].e }));
+      const res = TS.planTeam(d.model, { now, end, team: { att: t.ts.att, oppDfn: o.ts.dfn, home: isHome }, diff, manAdv0, reds: scenarioReds, units, tempo: TEMPO[sc.tempo] || 1 });
+      const players = t.players.map((p, i) => ({ p, ...wins[i], lambda: res.players[i].lambda, goalProb: res.players[i].q }));
+      plan.teams.push({ t, o, isHome, diff, manAdv0, players, others: res.others, mu: res.mu });
+    }
+    return plan;
+  }
+
+  function simComputeFitted() {
+    const d = sim.data;
+    const sc = sim.scenario;
+    const plan = simPlanFitted(d, sc, sim.edits || {});
+    const y = Math.max(0, Number(sc.threshold) || 0);
+    const t0 = performance.now();
+    const input = plan.teams.map((pt) => ({
+      base: { shots: pt.t.shotsSoFar, sot: pt.t.sotSoFar, goals: pt.t.goals },
+      units: [...pt.players.map((x) => ({ lambda: x.lambda, q: x.goalProb, sot: x.p.rate?.sotRatio ?? 0.33 })), { lambda: pt.others.lambda, q: pt.others.q, sot: 0.33 }],
+    }));
+    const res = sim.TS.simulate(d.model, input, SIM_RUNS);
+    const N = SIM_RUNS;
+    const atLeast = (hist) => [...hist.entries()].reduce((a, [k, n]) => a + (k >= y ? n : 0), 0) / N;
+    sim.results = {
+      ms: performance.now() - t0,
+      plan,
+      threshold: y,
+      fitted: true,
+      teams: plan.teams.map((pt, ti) => {
+        const acc = res.teams[ti];
+        return {
+          id: pt.t.id,
+          name: pt.t.name,
+          abbrev: pt.t.abbrev,
+          logo: pt.t.logo,
+          isHome: pt.isHome,
+          mean: acc.shots / N,
+          sot: acc.sot / N,
+          goals: acc.goals / N,
+          pGe: atLeast(acc.hist),
+          range: simRange(acc.hist),
+          hist: acc.hist,
+          players: pt.players.map((x, pi) => {
+            const pa = acc.units[pi];
+            return { ...x, xShots: pa.shots / N, xSot: pa.sot / N, xGoals: pa.goals / N, p1: pa.c1 / N, p2: pa.c2 / N, p3: pa.c3 / N, pGoal: pa.g1 / N };
+          }),
+        };
+      }),
+      total: { mean: res.total.sum / N, pGe: atLeast(res.total.hist), hist: res.total.hist, range: simRange(res.total.hist) },
+    };
+  }
+
+  // Central 80% range (10th to 90th percentile) of a simulated count histogram.
+  function simRange(hist) {
+    const e = [...hist.entries()].sort((a, b) => a[0] - b[0]);
+    const n = e.reduce((a, x) => a + x[1], 0);
+    let c = 0;
+    let lo = null;
+    let hi = null;
+    for (const [k, m] of e) {
+      c += m;
+      if (lo == null && c >= 0.1 * n) lo = k;
+      if (hi == null && c >= 0.9 * n) hi = k;
+    }
+    return [lo, hi];
+  }
+
   // ---- rendering ----
   const pct = (x) => `${Math.round(x * 100)}%`;
   const shortName = (p) => p.shortName || String(p.name || '').replace(/^(\S)\S+\s+(?=\S)/, '$1. ');
@@ -1031,10 +1147,11 @@
       <button class="btn" data-sim="reset" title="Clear lineup edits and scenario">Reset</button>
     </div>`;
 
+    const range = (x) => (r?.fitted && x.range ? ` · 80% range ${x.range[0]}–${x.range[1]}` : '');
     const tiles = r
       ? `<div class="sim-tiles">
-        ${[r.teams[0], r.teams[1]].filter(Boolean).map((t) => `<div class="tile-stat"><div class="k">${img(t.logo, t.name)} ${esc(t.abbrev)} ≥ ${r.threshold} shots</div><div class="v">${pct(t.pGe)}</div><div class="s">exp ${num1(t.mean)} shots · ${num1(t.sot)} on target · ${num1(t.goals)} goals</div></div>`).join('')}
-        <div class="tile-stat total"><div class="k">Total ≥ ${r.threshold} shots</div><div class="v">${pct(r.total.pGe)}</div><div class="s">exp ${num1(r.total.mean)} shots in total</div></div>
+        ${[r.teams[0], r.teams[1]].filter(Boolean).map((t) => `<div class="tile-stat"><div class="k">${img(t.logo, t.name)} ${esc(t.abbrev)} ≥ ${r.threshold} shots</div><div class="v">${pct(t.pGe)}</div><div class="s">exp ${num1(t.mean)} shots${range(t)} · ${num1(t.sot)} on target · ${num1(t.goals)} goals</div></div>`).join('')}
+        <div class="tile-stat total"><div class="k">Total ≥ ${r.threshold} shots</div><div class="v">${pct(r.total.pGe)}</div><div class="s">exp ${num1(r.total.mean)} shots in total${range(r.total)}</div></div>
       </div>`
       : '';
 
@@ -1044,9 +1161,16 @@
 
     const table = r ? simPlayerTable(r, sc) : '';
 
-    const foot = `<p class="note sim-foot">How it works: each player's shots per 90 blend recent form (last ${d.meta.historyMatches} club matches, exponentially weighted, scaled by the defenses faced) with league-season totals, shrunk toward a position prior when the sample is small. The team rate is the sum of the players on the pitch × opposition leakiness (${home.abbrev} ${home.leakiness}, ${away.abbrev} ${away.leakiness}; 1.0 = league average) × home/away × shape × scenario. Goals thin from shots using each player's conversion and the opposing keeper's save rate (${esc(home.keeper?.name || '')} ${pct(home.keeper?.saveRate ?? 0.7)}, ${esc(away.keeper?.name || '')} ${pct(away.keeper?.saveRate ?? 0.7)}). Opposition lineup edits affect the model only through the keeper and shape; defenders are not modeled individually. League avg ${d.league.avgShots} shots per team. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached)${r ? `, simulated in ${Math.round(r.ms)} ms` : ''}.</p>`;
+    const fm = r?.fitted ? d.model : null;
+    const bt = fm?.backtest;
+    const modelLine = fm
+      ? `<p class="sim-model" title="${esc(`Model ${fm.model}, fitted ${String(fm.fitted).slice(0, 10)} on ${fm.seasons_fitted.join(', ')}. Sealed ${bt.season} test, ${bt.matches} matches, vs the original model: team shots NLL ${bt.model.team_nll} vs ${bt.previous_live_model.team_nll}, bias ${bt.model.bias} vs ${bt.previous_live_model.bias}, P(1+ shot) log-loss ${bt.model.p1_logloss} vs ${bt.previous_live_model.p1_logloss}, P(goal) log-loss ${bt.model.pgoal_logloss} vs ${bt.previous_live_model.pgoal_logloss}.`)}">Fitted model · backtested on ${esc(bt.season)}: 80% ranges hit ${pct(bt.model.cover80)} <span>(original model ${pct(bt.previous_live_model.cover80)})</span></p>`
+      : `<p class="sim-model">Original model · hand-set rates; the fitted model covers the Premier League only</p>`;
+    const foot = fm
+      ? `<p class="note sim-foot">How it works: fitted on ${fm.fit_matches} Premier League matches (${esc(fm.seasons_fitted.join(', '))}). Each side's shots for the rest of the match follow a negative binomial whose mean comes from its recency-weighted shots per league match (last ${fm.recency.team_n}: ${home.abbrev} ${num1(home.ts.att)}, ${away.abbrev} ${num1(away.ts.att)}), the opponent's shots allowed (${home.abbrev} ${num1(home.ts.dfn)}, ${away.abbrev} ${num1(away.ts.dfn)}), home advantage, score state, man advantage and the minutes left; league average ${num1(fm.league_ref.rate)}. Each player's expected shots are a share of that mean, set by his recency-weighted shots per 90 (last ${fm.recency.player_n} league appearances, shrunk to his position) against the team-mates on the pitch and by his position; the rest falls to later substitutes. Goals use a fitted conversion per shot; on target uses each player's recent ratio. Tempo scales every rate. History: each club's league matches this season and last (${fm.historyMatches} matches); cup games are left out, as in the fit, and a player's matches for a previous club count only if that club is one of these two. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached), simulated in ${Math.round(r.ms)} ms.</p>`
+      : `<p class="note sim-foot">How it works: each player's shots per 90 blend recent form (last ${d.meta.historyMatches} club matches, exponentially weighted, scaled by the defenses faced) with league-season totals, shrunk toward a position prior when the sample is small. The team rate is the sum of the players on the pitch × opposition leakiness (${home.abbrev} ${home.leakiness}, ${away.abbrev} ${away.leakiness}; 1.0 = league average) × home/away × shape × scenario. Goals thin from shots using each player's conversion and the opposing keeper's save rate (${esc(home.keeper?.name || '')} ${pct(home.keeper?.saveRate ?? 0.7)}, ${esc(away.keeper?.name || '')} ${pct(away.keeper?.saveRate ?? 0.7)}). Opposition lineup edits affect the model only through the keeper and shape; defenders are not modeled individually. League avg ${d.league.avgShots} shots per team. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached)${r ? `, simulated in ${Math.round(r.ms)} ms` : ''}.</p>`;
 
-    return `${head}<p class="note" style="margin:0 0 10px">${stateLine}</p>${controls}${tiles}${hist}<div class="sim-lineups">${lineupCols}</div>${table}${foot}`;
+    return `${head}${modelLine}<p class="note" style="margin:0 0 10px">${stateLine}</p>${controls}${tiles}${hist}<div class="sim-lineups">${lineupCols}</div>${table}${foot}`;
   }
 
   function simHistogram(histMap, y, mean) {
@@ -1099,7 +1223,11 @@
     const body = rows
       .slice(0, limit)
       .map(
-        (x) => `<tr><td class="pname">${esc(shortName(x.p))}<span class="pos">${esc(x.p.pos || '')}</span>${formTag(x.p.rate.formIndex)}</td><td class="pos">${esc(x.team.abbrev)}</td><td>${x.minutes}'</td><td title="rate per 90: form ${x.p.rate.components.form90 ?? '–'} · season ${x.p.rate.components.season90 ?? '–'} · prior ${x.p.rate.components.prior}">${num1(x.p.rate.shots)}</td><td class="hi">${num1(x.xShots)}</td><td>${pct(x.p1)}</td><td>${pct(x.p2)}</td><td>${pct(x.p3)}</td><td>${num1(x.xSot)}</td><td>${pct(x.pGoal)}</td></tr>`,
+        (x) => `<tr><td class="pname">${esc(shortName(x.p))}<span class="pos">${esc(x.p.pos || '')}</span>${formTag(x.p.rate.formIndex)}</td><td class="pos">${esc(x.team.abbrev)}</td><td>${x.minutes}'</td>${
+          r.fitted && x.p.ts
+            ? `<td title="shots per 90, recency-weighted over ${x.p.ts.apps} league appearances (${x.p.ts.minutes} min, ${x.p.ts.shots} shots), shrunk to the ${esc(x.p.ts.group)} average">${num1(x.p.ts.r90)}</td>`
+            : `<td title="rate per 90: form ${x.p.rate.components.form90 ?? '–'} · season ${x.p.rate.components.season90 ?? '–'} · prior ${x.p.rate.components.prior}">${num1(x.p.rate.shots)}</td>`
+        }<td class="hi">${num1(x.xShots)}</td><td>${pct(x.p1)}</td><td>${pct(x.p2)}</td><td>${pct(x.p3)}</td><td>${num1(x.xSot)}</td><td>${pct(x.pGoal)}</td></tr>`,
       )
       .join('');
     const teamOpts = [['all', 'Both teams'], ...r.teams.map((t) => [t.id, t.abbrev])];
