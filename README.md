@@ -55,6 +55,23 @@ trails the broadcast by 10 to 30 seconds.
 While a game is live the open modal re-fetches every 10 seconds, so player
 stats update in near real time (ESPN's feed itself trails play by 10–30 s).
 
+**Market read (Kalshi, NFL modal).** A plain-English read of how prediction
+markets are pricing the game, e.g. "Shootout, contrasting styles: CIN throws,
+ATL runs". The server pulls Kalshi's public NFL markets for the game (winner,
+spread, total, team totals, team yards, player passing / rushing / receiving
+yards, attempts and the scalar yardage ladders), turns each price ladder into an
+implied median (the 50% point of the yes-price midpoints, made monotone,
+linear between rungs) and runs a fixed set of rules over the result: total vs a
+league-typical 45, spread and win probability (lopsided at 9.5+ points or 80%),
+QB passing lines vs ~225, lead-back rushing lines vs ~60, and each team's pass
+share of priced yards (QB passing line vs the listed rushers' lines) compared
+with the same ratio at those typical levels (±5 points = pass- or run-leaning).
+The panel shows the headline, a short narrative, key numbers, per-team pass/run
+tilt bars and every player line by position. Missing markets are named rather
+than filled in, games without markets say so, and in-play prices are flagged.
+It is a hypothesis about what bettors are saying, not advice. Prices are cached
+for three minutes; the panel loads separately from the rest of the modal.
+
 Use the arrows, the date picker, or the left/right keys to move between days.
 Soccer league chips filter the soccer section (the choice is remembered).
 
@@ -64,6 +81,11 @@ Soccer league chips filter the soccer section (the choice is remembered).
   API (`site.api.espn.com`). ESPN's `dates` parameter is interpreted in US
   Eastern time, so a "day" is an Eastern-time day; kickoff times are shown in
   your browser's local timezone.
+- Market read: Kalshi's public trade API (`api.elections.kalshi.com`, no key).
+  A game's Kalshi events share one suffix, e.g. `KXNFLGAME-26NOV08DALIND`
+  (Eastern date, away and home codes); it is matched to the ESPN game by date
+  and team codes (ESPN `WSH`/`JAX` are Kalshi `WAS`/`JAC`). Player positions
+  come from ESPN team rosters.
 - Weather: Open-Meteo forecast at the venue city, hourly, nearest hour to
   kickoff. Venue cities are geocoded once and cached in `.cache/geocode.json`.
 - NFL rankings: built from ESPN box scores of completed games. Each completed
@@ -77,12 +99,13 @@ server.js          HTTP server, /api routes, static files
 lib/espn.js        ESPN fetch helpers and normalizers
 lib/weather.js     Open-Meteo geocoding + forecast
 lib/nflStats.js    NFL offense/defense ranking aggregation
+lib/kalshi.js      Kalshi NFL prices -> implied lines + rule-based market read
 lib/cache.js       in-memory TTL cache, disk cache, concurrency limiter
-public/            index.html, styles.css, app.js (vanilla JS)
+public/            index.html, styles.css, app.js (vanilla JS), kalshi.js (market panel)
 ```
 
 API routes: `/api/day?date=YYYYMMDD`, `/api/game/{nfl|nba|soccer}/{league}/{id}`,
-`/api/nfl/rankings`, `/api/live` (SSE stream), `/api/live-poll?date=YYYYMMDD`
+`/api/nfl/rankings`, `/api/nfl/{id}/market` (Kalshi market read), `/api/live` (SSE stream), `/api/live-poll?date=YYYYMMDD`
 (live fields of in-progress games, for hosts without streaming), `/api/health`.
 `api/index.js` is the Vercel entry point and `vercel.json` the deployment config.
 
@@ -115,6 +138,10 @@ What differs from running locally:
 ## Known limits
 
 - ESPN is an unofficial, undocumented feed; shapes can change without notice.
+- The Kalshi read only sees players Kalshi lists, so rushing totals miss
+  unlisted backs and the pass share runs a little high; the typical-split
+  baseline counts only the roles that are listed to offset this. Kalshi
+  rate-limits public reads, so a cold market read takes a few seconds.
 - NBA projected starters are not published by ESPN before tip-off, so the
   pre-game view is roster plus injury report.
 - Soccer form uses each club's last five matches in all competitions, as ESPN

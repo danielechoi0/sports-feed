@@ -1250,6 +1250,7 @@
       parts.push(comparePanel('Team stats', orderTeams(d.teamStats, g.away.id), NFL_TEAM_ROWS));
       for (const t of teams) parts.push(nflBoxPanel(t, d.players));
     }
+    if (window.KalshiMarket) parts.push(window.KalshiMarket.panel(g)); // public/kalshi.js
     for (const t of teams) parts.push(rankPanel(t, d.rankings?.teams?.[String(t.id)], meta));
     for (const t of teams) {
       const inj = d.injuries?.find((x) => String(x.team.id) === String(t.id));

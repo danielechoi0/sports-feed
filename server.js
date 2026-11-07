@@ -25,6 +25,7 @@ import {
 import { venueWeather } from './lib/weather.js';
 import { buildShotModel } from './lib/shotModel.js';
 import { getRankings, warmRankings } from './lib/nflStats.js';
+import { nflMarket } from './lib/kalshi.js';
 import { cached, pLimit, cacheStats } from './lib/cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -390,6 +391,12 @@ export async function handle(req, res) {
   }
   if (pathname === '/api/nfl/rankings') {
     return sendJson(res, 200, await getRankings());
+  }
+  const km = pathname.match(/^\/api\/nfl\/(\d+)\/market$/);
+  if (km) {
+    // Kalshi prices -> implied lines + rule-based read (lib/kalshi.js).
+    const data = await cached(`kalshi:nflmarket:${km[1]}`, 60_000, () => nflMarket(km[1]));
+    return sendJson(res, 200, data);
   }
   if (pathname === '/api/live') {
     if (SERVERLESS) {
