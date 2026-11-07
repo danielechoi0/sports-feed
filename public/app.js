@@ -1042,10 +1042,20 @@
       }
       const ed = edits[t.id] || { off: {}, on: {} };
       const wins = t.players.map((p) => simWindow(d, p, ed, now, end));
-      const units = t.players.map((p, i) => ({ id: p.id, group: p.ts?.group || 'M', r90: p.ts?.r90 ?? 1, pconv: p.ts?.pconv ?? 0.085, s: wins[i].s, e: wins[i].e }));
-      const res = TS.planTeam(d.model, { now, end, team: { att: t.ts.att, oppDfn: o.ts.dfn, home: isHome }, diff, manAdv0, reds: scenarioReds, units, tempo: TEMPO[sc.tempo] || 1 });
-      const players = t.players.map((p, i) => ({ p, ...wins[i], lambda: res.players[i].lambda, goalProb: res.players[i].q }));
-      plan.teams.push({ t, o, isHome, diff, manAdv0, players, others: res.others, mu: res.mu });
+      // Multi-competition model: home advantage does not apply at a neutral venue, and the
+      // in-play evidence (shots so far vs the pre-match expectation, team and player) is
+      // taken from the live state at the current minute and held for the rest of the run.
+      const m = d.model;
+      const home = isHome && !(m.home_excludes_neutral && d.match.neutral);
+      const inplay = !!m.inplay && now > 0;
+      const expected = m.inplay ? TS.expectedShots(m, t.ts.att, o.ts.dfn) : null;
+      const sfRatio = inplay ? TS.teamSfRatio(m, t.ts.sf ?? 0, expected, now) : 0;
+      const oppSfRatio = inplay ? TS.teamSfRatio(m, o.ts.sf ?? 0, TS.expectedShots(m, o.ts.att, t.ts.dfn), now) : 0;
+      const psf = (p, w) => (inplay && p.onPitch && w.s === now && p.ts?.onMin != null ? TS.playerSfRatio(m, p.ts.sf ?? 0, p.ts.r90, now - p.ts.onMin, now) : 0);
+      const units = t.players.map((p, i) => ({ id: p.id, group: p.ts?.group || 'M', r90: p.ts?.r90 ?? 1, pconv: p.ts?.pconv ?? 0.085, s: wins[i].s, e: wins[i].e, psf: psf(p, wins[i]) }));
+      const res = TS.planTeam(m, { now, end, team: { att: t.ts.att, oppDfn: o.ts.dfn, home, sfRatio, oppSfRatio }, diff, manAdv0, reds: scenarioReds, units, tempo: TEMPO[sc.tempo] || 1 });
+      const players = t.players.map((p, i) => ({ p, ...wins[i], lambda: res.players[i].lambda, goalProb: res.players[i].q, psf: units[i].psf }));
+      plan.teams.push({ t, o, isHome, diff, manAdv0, players, others: res.others, mu: res.mu, expected, sfRatio, inplay });
     }
     return plan;
   }
@@ -1118,7 +1128,10 @@
     const head = `<h3>Shot simulator <span class="right">player-level Monte Carlo · ${SIM_RUNS.toLocaleString()} runs</span></h3>`;
     if (sim.error) return `${head}<p class="error">Could not build the model: ${esc(sim.error)}</p><button class="btn" data-sim="load">Retry</button>`;
     if (!sim.data) {
-      if (sim.loading) return `${head}<p class="note" style="margin:0">Building the model: last ten matches per club, every player's season numbers, opponent strength…</p>`;
+      if (sim.loading)
+        return g.league?.slug === 'eng.1'
+          ? `${head}<p class="note" style="margin:0">Building the model: last ten matches per club, every player's season numbers, opponent strength…</p>`
+          : `${head}<p class="note" style="margin:0">Building the model: each club's recent league and European matches, their opponents' strength at the time, every player's history… The first match of a competition can take 10–20 seconds; later ones are quicker.</p>`;
       return `${head}<p class="note" style="margin:0 0 10px">Simulate how many shots each side and each player will take, under a thesis you set: score state, red cards, tempo, and your own substitutions. Rates come from each player's recent form and season stats, adjusted for the opposition.</p><button class="btn primary" data-sim="load">Load simulator</button>`;
     }
     const d = sim.data;
@@ -1163,14 +1176,35 @@
 
     const fm = r?.fitted ? d.model : null;
     const bt = fm?.backtest;
-    const modelLine = fm
+    const modelLine = fm?.pooled
+      ? simPooledModelLine(fm)
+      : fm
       ? `<p class="sim-model" title="${esc(`Model ${fm.model}, fitted ${String(fm.fitted).slice(0, 10)} on ${fm.seasons_fitted.join(', ')}. Sealed ${bt.season} test, ${bt.matches} matches, vs the original model: team shots NLL ${bt.model.team_nll} vs ${bt.previous_live_model.team_nll}, bias ${bt.model.bias} vs ${bt.previous_live_model.bias}, P(1+ shot) log-loss ${bt.model.p1_logloss} vs ${bt.previous_live_model.p1_logloss}, P(goal) log-loss ${bt.model.pgoal_logloss} vs ${bt.previous_live_model.pgoal_logloss}.`)}">Fitted model · backtested on ${esc(bt.season)}: 80% ranges hit ${pct(bt.model.cover80)} <span>(original model ${pct(bt.previous_live_model.cover80)})</span></p>`
-      : `<p class="sim-model">Original model · hand-set rates; the fitted model covers the Premier League only</p>`;
-    const foot = fm
+      : `<p class="sim-model">Original model · hand-set rates; the fitted model could not be built for this match</p>`;
+    const foot = fm?.pooled
+      ? simPooledFoot(d, fm, r, home, away)
+      : fm
       ? `<p class="note sim-foot">How it works: fitted on ${fm.fit_matches} Premier League matches (${esc(fm.seasons_fitted.join(', '))}). Each side's shots for the rest of the match follow a negative binomial whose mean comes from its recency-weighted shots per league match (last ${fm.recency.team_n}: ${home.abbrev} ${num1(home.ts.att)}, ${away.abbrev} ${num1(away.ts.att)}), the opponent's shots allowed (${home.abbrev} ${num1(home.ts.dfn)}, ${away.abbrev} ${num1(away.ts.dfn)}), home advantage, score state, man advantage and the minutes left; league average ${num1(fm.league_ref.rate)}. Each player's expected shots are a share of that mean, set by his recency-weighted shots per 90 (last ${fm.recency.player_n} league appearances, shrunk to his position) against the team-mates on the pitch and by his position; the rest falls to later substitutes. Goals use a fitted conversion per shot; on target uses each player's recent ratio. Tempo scales every rate. History: each club's league matches this season and last (${fm.historyMatches} matches); cup games are left out, as in the fit, and a player's matches for a previous club count only if that club is one of these two. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached), simulated in ${Math.round(r.ms)} ms.</p>`
       : `<p class="note sim-foot">How it works: each player's shots per 90 blend recent form (last ${d.meta.historyMatches} club matches, exponentially weighted, scaled by the defenses faced) with league-season totals, shrunk toward a position prior when the sample is small. The team rate is the sum of the players on the pitch × opposition leakiness (${home.abbrev} ${home.leakiness}, ${away.abbrev} ${away.leakiness}; 1.0 = league average) × home/away × shape × scenario. Goals thin from shots using each player's conversion and the opposing keeper's save rate (${esc(home.keeper?.name || '')} ${pct(home.keeper?.saveRate ?? 0.7)}, ${esc(away.keeper?.name || '')} ${pct(away.keeper?.saveRate ?? 0.7)}). Opposition lineup edits affect the model only through the keeper and shape; defenders are not modeled individually. League avg ${d.league.avgShots} shots per team. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached)${r ? `, simulated in ${Math.round(r.ms)} ms` : ''}.</p>`;
 
     return `${head}${modelLine}<p class="note" style="margin:0 0 10px">${stateLine}</p>${controls}${tiles}${hist}<div class="sim-lineups">${lineupCols}</div>${table}${foot}`;
+  }
+
+  // Multi-competition model (team_share_oppadj): this competition's sealed-test scores.
+  function simPooledModelLine(fm) {
+    const bt = fm.backtest;
+    if (!bt?.model || !bt.previous_live_model) return `<p class="sim-model">Fitted model (all seven competitions)</p>`;
+    const title = `Model ${fm.model}: one fit over all seven competitions, fitted ${String(fm.fitted).slice(0, 10)} on ${fm.seasons_fitted.join(', ')}. Sealed ${bt.season} test, ${bt.name}, ${bt.matches} matches, vs the original model: team shots NLL ${bt.model.team_nll} vs ${bt.previous_live_model.team_nll}, bias ${bt.model.bias} vs ${bt.previous_live_model.bias}, P(1+ shot) log-loss ${bt.model.p1_logloss} vs ${bt.previous_live_model.p1_logloss}, P(goal) log-loss ${bt.model.pgoal_logloss} vs ${bt.previous_live_model.pgoal_logloss}.`;
+    return `<p class="sim-model" title="${esc(title)}">Fitted model · backtested on ${esc(bt.season)} ${esc(bt.name)}: 80% ranges hit ${pct(bt.model.cover80)} <span>(original model ${pct(bt.previous_live_model.cover80)})</span></p>`;
+  }
+
+  function simPooledFoot(d, fm, r, home, away) {
+    const lg = fm.backtest?.name || 'this competition';
+    const pt = (t) => r.plan.teams.find((x) => x.t.id === t.id);
+    const live = r.plan.teams.some((x) => x.inplay);
+    const sfText = live ? ` (now: ${home.abbrev} ${home.ts.sf} shots vs ${num1((pt(home).expected * r.plan.now) / fm.inplay.match_minutes)} expected by ${r.plan.now}', ${away.abbrev} ${away.ts.sf} vs ${num1((pt(away).expected * r.plan.now) / fm.inplay.match_minutes)})` : '';
+    const neutral = d.match.neutral ? ' (none at this neutral venue)' : '';
+    return `<p class="note sim-foot">How it works: one model fitted on ${fm.fit_matches.toLocaleString()} matches of all seven competitions (${esc(fm.seasons_fitted.join(', '))}), with its own shot level for each competition. Each side's shots for the rest of the match follow a negative binomial whose mean comes from its opponent-adjusted shots per match over its last ${fm.recency.team_n} league and European matches (each match's shots scaled by that opponent's strength at the time: ${home.abbrev} ${num1(home.ts.att)}, ${away.abbrev} ${num1(away.ts.att)}), the opponent's opponent-adjusted shots allowed (${home.abbrev} ${num1(home.ts.dfn)}, ${away.abbrev} ${num1(away.ts.dfn)}), home advantage${neutral}, score state, man advantage, the minutes left and, once the match is under way, each side's shots so far against its pre-match expectation${sfText}; ${esc(lg)} average ${num1(fm.league_ref.rate)}. Each player's expected shots are a share of that mean, set by his recency-weighted shots per 90 (last ${fm.recency.player_n} appearances in these competitions, shrunk to his position) against the team-mates on the pitch, by his position and, in play, by his own shots so far against expectation; the rest falls to later substitutes. Goals use a fitted conversion per shot; on target uses each player's recent ratio. Tempo scales every rate. History: ${d.model.historyMatches} matches (both clubs' recent matches in all seven competitions, and each recent opponent's matches before it met them); competition rates are fixed at the model's export, and a player's appearances for a previous club count when that club's matches were fetched. Built in ${d.meta.ms} ms (${d.meta.matchesFetched} matches fetched, ${d.meta.cacheHits} cached), simulated in ${Math.round(r.ms)} ms.</p>`;
   }
 
   function simHistogram(histMap, y, mean) {
@@ -1225,7 +1259,7 @@
       .map(
         (x) => `<tr><td class="pname">${esc(shortName(x.p))}<span class="pos">${esc(x.p.pos || '')}</span>${formTag(x.p.rate.formIndex)}</td><td class="pos">${esc(x.team.abbrev)}</td><td>${x.minutes}'</td>${
           r.fitted && x.p.ts
-            ? `<td title="shots per 90, recency-weighted over ${x.p.ts.apps} league appearances (${x.p.ts.minutes} min, ${x.p.ts.shots} shots), shrunk to the ${esc(x.p.ts.group)} average">${num1(x.p.ts.r90)}</td>`
+            ? `<td title="shots per 90, recency-weighted over ${x.p.ts.apps} ${sim.data.model?.pooled ? 'appearances in league and European games' : 'league appearances'} (${x.p.ts.minutes} min, ${x.p.ts.shots} shots), shrunk to the ${esc(x.p.ts.group)} average${x.psf ? `; ${x.p.ts.sf} shot${x.p.ts.sf === 1 ? '' : 's'} so far in this match` : ''}">${num1(x.p.ts.r90)}</td>`
             : `<td title="rate per 90: form ${x.p.rate.components.form90 ?? '–'} · season ${x.p.rate.components.season90 ?? '–'} · prior ${x.p.rate.components.prior}">${num1(x.p.rate.shots)}</td>`
         }<td class="hi">${num1(x.xShots)}</td><td>${pct(x.p1)}</td><td>${pct(x.p2)}</td><td>${pct(x.p3)}</td><td>${num1(x.xSot)}</td><td>${pct(x.pGoal)}</td></tr>`,
       )

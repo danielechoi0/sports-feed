@@ -11,6 +11,8 @@ python3 -m venv .venv && .venv/bin/pip install -r pipeline/requirements.txt
 .venv/bin/python -m pipeline.evaluate   # score every model on the dev split, every competition
 .venv/bin/python -m pipeline.evaluate --leagues eng.1 --history league   # the original Premier League-only setup
 .venv/bin/python -m pipeline.tune       # tune team_share's recency/shrinkage settings on dev (Premier League)
+.venv/bin/python -m pipeline.export     # Premier League app model -> models/shot-eng.1.json; then node pipeline/parity.mjs
+.venv/bin/python -m pipeline.export --pooled   # other competitions -> models/shot-pooled.json; then node pipeline/parity-pooled.mjs
 ```
 
 `data/` (raw downloads and tables) is gitignored and rebuilt by the first two

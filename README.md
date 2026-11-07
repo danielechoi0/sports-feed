@@ -171,8 +171,37 @@ Monte Carlo in the browser) uses two models:
   are fixed at export; a player's matches for a previous club count only if
   that club is one of the two in the match; shots on target are not modelled
   (each player's recent ratio).
-- **Other leagues: the original hand-set model** (last 10 club matches incl.
-  cups, season totals, position priors).
+- **LaLiga, Bundesliga, Serie A, Ligue 1, Champions League, Europa League:
+  the multi-competition fitted model** `team_share_oppadj`, exported to
+  `models/shot-pooled.json` by `python -m pipeline.export --pooled` (one fit
+  over all seven competitions, 2023/24–2025/26, with a team-shot intercept per
+  competition). On the sealed 2026/27 test it beat the original model in every
+  competition (80% ranges hit 74–79% vs 55–63%; the model line shows the
+  competition's numbers). Same structure as above plus: a club's history is
+  its matches in all seven competitions (league and European games, and for a
+  cup tie both clubs' domestic leagues); team form is opponent-adjusted (each
+  past match's shots divided by that opponent's relative strength at the
+  time: its own previous 30 matches against its competition's rate that day);
+  and in play, each side's commentary shots so far against its pre-match
+  expectation and each player's shots so far against his own, evaluated at
+  the live minute and held for the rest of the run. The server
+  (`pooledInputs` in `lib/shotModel.js`) lists matches with one scoreboard
+  request per competition and year (finished years kept on disk), then fetches
+  both clubs' last 80 matches, each recent opponent's 30 before it met them,
+  and lineup players' previous clubs' matches (found from the rows fetched and
+  ESPN's athlete event log), all reduced to the cached compact extract. A
+  competition's first build fetches ~600–1,100 summaries (10–20 s); later
+  builds mostly hit the disk cache (1–5 s). `node pipeline/parity-pooled.mjs`
+  checks JS against Python (all features to ~1e-15 given the same reference
+  rates), the ESPN extract against the pipeline tables (cup extra time and
+  shoot-outs included) and the Monte Carlo marginals. Approximations:
+  competition rates (today's and the history used for opponent ratings) are
+  fixed at export; a player's appearances for a previous club count only for
+  that club's matches the build fetched (on 12 recent matches checked against
+  the pipeline, 80% of players' shot rates match exactly, 94% within 5%; team
+  features match exactly).
+- If the fitted model cannot be built, the original hand-set model (last 10
+  club matches incl. cups, season totals, position priors) is used.
 
 ## Shot model pipeline
 

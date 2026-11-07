@@ -19,6 +19,15 @@
 // M(a) - M(b), where M(t) is the model's expected shots from t to full time;
 // a player's are M(a) pi(a) - M(b) pi(b). Without red cards or substitutions
 // in the window this telescopes back to the model's own prediction.
+//
+// The multi-competition model (models/shot-pooled.json, team_share_oppadj;
+// model.league names the competition being simulated) adds to log mu the
+// competition intercept b_lg and b_sf sf_ratio + b_osf opp_sf_ratio (each
+// side's shots so far vs its pre-match expectation for that much of the
+// match), and to log lambda c_psf p_sf_ratio (the player's shots so far vs his
+// expectation for the minutes he has played). The in-play terms are evaluated
+// once, at the live minute, and held for the rest of the simulation: like the
+// pipeline's checkpoints, they summarise what is known when predicting.
 
 const LATE_FROM = 45;
 const LATE_TO = 60;
@@ -38,11 +47,37 @@ function interp(checks, beta, prefix, t) {
 
 export const lateWeight = (t) => Math.min(1, Math.max(0, (t - LATE_FROM) / (LATE_TO - LATE_FROM)));
 
-// Static (pre-match) part of log mu: strength, home, league rate offset.
+// Static part of log mu: strength, home, league rate offset; for the
+// multi-competition model also the competition intercept and the in-play
+// evidence (fixed at the moment of prediction).
 // rate: the league reference rate (defaults to the exported one).
-export function teamStatic(model, { att, oppDfn, home, rate = model.league_ref.rate }) {
+export function teamStatic(model, { att, oppDfn, home, rate = model.league_ref.rate, sfRatio = 0, oppSfRatio = 0 }) {
   const b = model.team.beta;
-  return b.log_att * Math.log(att / rate) + b.log_opp_def * Math.log(oppDfn / rate) + b.home * (home ? 1 : 0) + Math.log(rate);
+  return (
+    b.log_att * Math.log(att / rate) +
+    b.log_opp_def * Math.log(oppDfn / rate) +
+    b.home * (home ? 1 : 0) +
+    (b[`lg_${model.league}`] ?? 0) +
+    (b.sf_ratio ?? 0) * sfRatio +
+    (b.opp_sf_ratio ?? 0) * oppSfRatio +
+    Math.log(rate)
+  );
+}
+
+// ---- in-play evidence (multi-competition model, pipeline/models/pooled.py) ----
+// Pre-match expected shots for the whole match (InPlayEvidence._pre_match).
+export const expectedShots = (model, att, oppDfn, rate = model.league_ref.rate) => (att * oppDfn) / rate;
+// A side's shots so far at minute t vs what was expected for that much of the match.
+export function teamSfRatio(model, sf, expected, t) {
+  const ip = model.inplay;
+  if (!ip || t <= 0) return 0;
+  return Math.log((sf + ip.team_prior_shots) / ((expected * t) / ip.match_minutes + ip.team_prior_shots));
+}
+// A player's shots so far vs his expected shots for the minutes he has played.
+export function playerSfRatio(model, sf, r90, played, t) {
+  const ip = model.inplay;
+  if (!ip || t <= 0) return 0;
+  return Math.log((sf + ip.player_prior_shots) / ((r90 * Math.max(0, played)) / 90 + ip.player_prior_shots));
 }
 
 // In-match state part of log mu at minute t: diff = goals for - against, manAdv in [-1, 1].
@@ -65,10 +100,11 @@ export function teamRemaining(model, t, stat, diff, manAdv) {
 }
 
 // Player's expected share of the team's remaining shots at minute t.
-export function playerShare(model, t, group, logShare) {
+// psf: his in-play shots-so-far ratio (multi-competition model), fixed at the moment of prediction.
+export function playerShare(model, t, group, logShare, psf = 0) {
   const b = model.player.beta;
   const pos = group === model.player.base_position ? 0 : b[`pos_${group}`] ?? 0;
-  return Math.exp(interp(model.checkpoints, b, 't', Math.min(t, model.checkpoints[model.checkpoints.length - 1])) + b.log_share * logShare + pos);
+  return Math.exp(interp(model.checkpoints, b, 't', Math.min(t, model.checkpoints[model.checkpoints.length - 1])) + b.log_share * logShare + pos + (b.p_sf_ratio ?? 0) * psf);
 }
 
 export function goalPerShot(model, conv) {
@@ -76,14 +112,14 @@ export function goalPerShot(model, conv) {
 }
 
 // Point prediction at one moment (the pipeline's predict()), for parity checks.
-// onPitch: [{id, group, r90, pconv}]
+// team: {att, oppDfn, home, rate?, sfRatio?, oppSfRatio?}; onPitch: [{id, group, r90, pconv, psf?}]
 export function predictAt(model, t, team, diff, manAdv, onPitch) {
   const stat = teamStatic(model, team);
   const mu = teamRemaining(model, t, stat, diff, manAdv);
   const tot = onPitch.reduce((a, p) => a + p.r90, 0) || 1;
   const k = model.player.k;
   const players = onPitch.map((p) => {
-    const lambda = mu * playerShare(model, t, p.group, Math.log(p.r90 / tot));
+    const lambda = mu * playerShare(model, t, p.group, Math.log(p.r90 / tot), p.psf || 0);
     const lg = lambda * goalPerShot(model, p.pconv);
     return { id: p.id, lambda, p1: nbTail(lambda, k, 1), p2: nbTail(lambda, k, 2), p3: nbTail(lambda, k, 3), pgoal: 1 - Math.pow(k / (k + lg), k) };
   });
@@ -91,7 +127,7 @@ export function predictAt(model, t, team, diff, manAdv, onPitch) {
 }
 
 // ---- scenario plan ----
-// units: [{id, group, r90, pconv, s, e}] players with their on-pitch interval
+// units: [{id, group, r90, pconv, s, e, psf?}] players with their on-pitch interval
 // inside [now, end] (s == null: not used). Returns expected shots per unit and
 // for "others" (team shots the listed players do not take: later substitutes).
 // reds: [{minute, delta}] changes to this team's man advantage inside the window.
@@ -119,7 +155,7 @@ export function planTeam(model, { now, end, team, diff, manAdv0, reds = [], unit
     const tot = on.reduce((s, u) => s + u.r90, 0) || 1;
     const xs = on.map((u) => {
       const ls = Math.log(u.r90 / tot);
-      return Math.max(0, Ma * playerShare(model, a, u.group, ls) - Mb * playerShare(model, b, u.group, ls));
+      return Math.max(0, Ma * playerShare(model, a, u.group, ls, u.psf || 0) - Mb * playerShare(model, b, u.group, ls, u.psf || 0));
     });
     const sx = xs.reduce((s, x) => s + x, 0);
     const scale = sx > seg && sx > 0 ? seg / sx : 1; // players never take more than the team
