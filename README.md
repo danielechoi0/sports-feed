@@ -140,6 +140,14 @@ What differs from running locally:
   writable (`lib/cache.js` tries `CACHE_DIR`, then `.cache`, then the temp
   dir). Set `CACHE_DIR` to override the location anywhere.
 
+## Shot model pipeline
+
+`pipeline/` holds the offline data, backtest and improvement loop for the
+soccer shot simulator (Python; see `pipeline/README.md`). It downloads every
+Premier League match since 2022/23, replays the live simulator and candidate
+models on past matches, and scores them; results and the experiment ledger are
+in `pipeline/reports/`.
+
 ## Known limits
 
 - ESPN is an unofficial, undocumented feed; shapes can change without notice.
