@@ -660,6 +660,10 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .kx .kx-team { grid-row: auto; }
   .kx .kx-lean .pp { display: block; margin-left: 0; }
 }
+.kx .kx-vs { font-size: 9px; margin-left: 3px; }
+.kx .kx-vs.high { color: var(--good); }
+.kx .kx-vs.low { color: var(--bad); }
+.kx .kx-avg { display: block; font-size: 10px; color: var(--muted); font-weight: 400; }
 /* ==== end Market read (Kalshi) ==== */
 
 /* ==== NFL depth chart ==== */

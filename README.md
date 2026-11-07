@@ -63,11 +63,14 @@ ATL runs". The server pulls Kalshi's public NFL markets for the game (winner,
 spread, total, team totals, team yards, player passing / rushing / receiving
 yards, attempts and the scalar yardage ladders), turns each price ladder into an
 implied median (the 50% point of the yes-price midpoints, made monotone,
-linear between rungs) and runs a fixed set of rules over the result: total vs a
-league-typical 45, spread and win probability (lopsided at 9.5+ points or 80%),
-QB passing lines vs ~225, lead-back rushing lines vs ~60, and each team's pass
-share of priced yards (QB passing line vs the listed rushers' lines) compared
-with the same ratio at those typical levels (±5 points = pass- or run-leaning).
+linear between rungs) and compares every line with the current season (ESPN):
+each player's line vs his own yards per game played (12%+ and a few yards off =
+above/below), the game total and each team's implied points vs the season-based
+expectation (team points per game averaged with what the opponent allows; ±3 =
+more/less scoring than usual), and each team's pass share of priced yards (QB
+line vs the listed rushers' lines) vs the same players' season split (±5 points
+= throwing or running more than usual). Spread and win probability use fixed
+cut-offs (lopsided at 9.5+ points or 80%, coin flip within 3).
 The panel shows the headline, a short narrative, key numbers, per-team pass/run
 tilt bars and every player line by position. Missing markets are named rather
 than filled in, games without markets say so, and in-play prices are flagged.
@@ -141,8 +144,11 @@ What differs from running locally:
 
 - ESPN is an unofficial, undocumented feed; shapes can change without notice.
 - The Kalshi read only sees players Kalshi lists, so rushing totals miss
-  unlisted backs and the pass share runs a little high; the typical-split
-  baseline counts only the roles that are listed to offset this. Kalshi
+  unlisted backs; the season split it is compared with uses the same listed
+  players to keep it like for like. Season averages are per game played, so a
+  backup stepping in as starter looks "above average"; players with fewer than
+  2 games have no baseline (a new starting QB falls back to the team's season
+  passing average). Kalshi
   rate-limits public reads, so a cold market read takes a few seconds.
 - NBA projected starters are not published by ESPN before tip-off, so the
   pre-game view is roster plus injury report.

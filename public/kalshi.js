@@ -62,7 +62,7 @@
       ${keys(s.keyNumbers)}
       ${tilt(s.teamTilt)}
       ${players(d)}
-      <p class="note kx-foot">${esc(s.method)} League-typical levels are fixed constants (total ${esc(d.baselines?.gameTotal)}, starting QB ${esc(d.baselines?.qbPassYds)} pass yds, lead RB ${esc(d.baselines?.rb1RushYds)} rush yds). ${hit.error ? `Last refresh failed (${esc(hit.error)}); showing earlier prices. ` : ''}<strong>Prices from Kalshi, not betting advice.</strong></p>`;
+      <p class="note kx-foot">${esc(s.method)} ${hit.error ? `Last refresh failed (${esc(hit.error)}); showing earlier prices. ` : ''}<strong>Prices from Kalshi, not betting advice.</strong></p>`;
   }
 
   function keys(list) {
@@ -84,21 +84,25 @@
         const pp = t.pp > 0 ? `+${t.pp}` : String(t.pp);
         return `<div class="kx-tilt">
           <span class="kx-team">${img(t.logo, t.name)}${esc(t.team)}</span>
-          <div class="kx-bar" role="img" aria-label="${esc(`${t.team}: ${pass}% of priced yards passing, typical ${typ}%`)}">
+          <div class="kx-bar" role="img" aria-label="${esc(`${t.team}: ${pass}% of priced yards passing, ${typ}% for the same players this season`)}">
             <div class="pass" style="width:${pass}%"><span>${pass}% pass</span></div><div class="run"><span>${100 - pass}% run</span></div>
-            <i class="mark" style="left:${typ}%" title="League-typical ${typ}% pass"></i>
+            <i class="mark" style="left:${typ}%" title="Same players' season split: ${typ}% pass"></i>
           </div>
-          <span class="kx-lean ${esc(t.lean)}">${esc(LEAN[t.lean] || '')}<span class="pp">${esc(pp)} pts vs typical · ${esc(t.passYds)} pass / ${esc(t.rushYds)} rush yds</span></span>
+          <span class="kx-lean ${esc(t.lean)}">${esc(LEAN[t.lean] || '')}<span class="pp">${esc(pp)} pts vs season · ${esc(t.passYds)} pass / ${esc(t.rushYds)} rush yds</span></span>
         </div>`;
       })
       .join('');
-    return `<div class="subhead">Pass / run tilt of priced yards</div><div class="kx-tilts">${body}</div><p class="note kx-legend"><span class="sw pass"></span>QB passing line <span class="sw run"></span>listed rushers' lines <span class="sw mark"></span>league-typical split</p>`;
+    return `<div class="subhead">Pass / run tilt of priced yards</div><div class="kx-tilts">${body}</div><p class="note kx-legend"><span class="sw pass"></span>QB passing line <span class="sw run"></span>listed rushers' lines <span class="sw mark"></span>same players' season split</p>`;
   }
 
+  const VS = { high: '▲', low: '▼', 'in line': '' };
   const cell = (x) => {
     if (!x) return '<td>-</td>';
     const title = x.basis ? 'Mean from the scalar ladder market (median off the price ladder)' : x.below != null ? 'Median below the lowest Kalshi rung' : x.above != null ? 'Median above the highest Kalshi rung' : 'Implied median (50% point)';
-    return `<td class="${x.line != null || x.basis ? 'hi' : ''}" title="${esc(title)}">${esc(x.display ?? '-')}</td>`;
+    const avg = x.seasonAvg != null ? `. Season average ${Math.round(x.seasonAvg)}${x.vs && x.vs !== 'in line' ? ` (line ${x.vs === 'high' ? 'above' : 'below'} it)` : ''}` : '. No season average';
+    const mark = x.vs && VS[x.vs] ? `<span class="kx-vs ${x.vs}">${VS[x.vs]}</span>` : '';
+    const sub = x.seasonAvg != null ? `<span class="kx-avg">${Math.round(x.seasonAvg)}</span>` : '';
+    return `<td class="${x.line != null || x.basis ? 'hi' : ''}" title="${esc(title + avg)}">${esc(x.display ?? '-')}${mark}${sub}</td>`;
   };
 
   function players(d) {
@@ -118,7 +122,7 @@
       )
       .join('');
     const n = groups.reduce((a, p) => a + d.players[p].length, 0);
-    return `<details class="kx-players" open><summary>Player lines by position (${n})</summary><div class="scroll"><table class="box"><thead><tr><th>Player</th><th title="Passing yards">Pass</th><th title="Rushing yards">Rush</th><th title="Receiving yards">Rec</th><th title="Pass attempts (QB) or carries (RB)">Att</th></tr></thead><tbody>${rows}</tbody></table></div></details>`;
+    return `<details class="kx-players" open><summary>Player lines by position (${n})</summary><div class="scroll"><table class="box"><thead><tr><th>Player</th><th title="Passing yards">Pass</th><th title="Rushing yards">Rush</th><th title="Receiving yards">Rec</th><th title="Pass attempts (QB) or carries (RB)">Att</th></tr></thead><tbody>${rows}</tbody></table></div><p class="note">Small grey number: season average per game. ▲/▼: line above/below it.</p></details>`;
   }
 
   window.KalshiMarket = { panel };
