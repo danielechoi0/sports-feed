@@ -28,6 +28,7 @@ import { venueWeather } from './lib/weather.js';
 import { buildShotModel } from './lib/shotModel.js';
 import { getRankings, warmRankings } from './lib/nflStats.js';
 import { nflMarket } from './lib/kalshi.js';
+import { gameWhales } from './lib/whales.js';
 import { cached, pLimit, cacheStats } from './lib/cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -407,6 +408,15 @@ export async function handle(req, res) {
   if (km) {
     // Kalshi prices -> implied lines + rule-based read (lib/kalshi.js).
     const data = await cached(`kalshi:nflmarket:${km[1]}`, 60_000, () => nflMarket(km[1]));
+    return sendJson(res, 200, data);
+  }
+  const wm = pathname.match(/^\/api\/whales\/(nfl|nba|soccer)\/([a-z0-9.]+)\/(\d+)$/);
+  if (wm) {
+    // Large Kalshi trades on the game-winner market (lib/whales.js).
+    const [, sport, league, id] = wm;
+    if (sport === 'soccer') soccerPath(league); // validates the league
+    else if (league !== sport) return sendJson(res, 404, { error: 'not found' });
+    const data = await cached(`whales:${sport}:${league}:${id}`, 30_000, () => gameWhales(sport, league, id));
     return sendJson(res, 200, data);
   }
   if (pathname === '/api/live') {

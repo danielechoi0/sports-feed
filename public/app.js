@@ -21,7 +21,7 @@
     tickTimer: null,
     halftimeAt: new Map(), // soccer game id -> halftime whistle ISO (from detail)
   };
-  if (!['all', 'nfl', 'nba', 'soccer'].includes(state.sportTab)) state.sportTab = 'all';
+  if (!['all', 'nfl', 'nba', 'soccer', 'whales'].includes(state.sportTab)) state.sportTab = 'all';
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const el = {
@@ -258,15 +258,16 @@
     return d ? [...d.nfl, ...d.nba, ...d.soccer] : [];
   }
   function visible(g) {
-    if (state.sportTab !== 'all' && g.sport !== state.sportTab) return false;
+    // The Whales tab is a view of every sport, not a sport filter.
+    if (state.sportTab !== 'all' && state.sportTab !== 'whales' && g.sport !== state.sportTab) return false;
     if (g.sport === 'soccer' && state.hiddenLeagues.has(g.league.slug)) return false;
     return true;
   }
 
-  function renderTabs(games) {
-    const counts = { all: games.length, nfl: 0, nba: 0, soccer: 0 };
+  function renderTabs(games, whaleCount) {
+    const counts = { all: games.length, nfl: 0, nba: 0, soccer: 0, whales: whaleCount ?? '' };
     for (const g of games) counts[g.sport]++;
-    const labels = { all: 'All', nfl: 'NFL', nba: 'NBA', soccer: 'Soccer' };
+    const labels = { all: 'All', nfl: 'NFL', nba: 'NBA', soccer: 'Soccer', whales: 'Whales' };
     el.tabs.innerHTML = Object.keys(labels)
       .map((k) => `<button class="tab" data-tab="${k}" aria-pressed="${state.sportTab === k}">${labels[k]}<span class="n">${counts[k]}</span></button>`)
       .join('');
@@ -294,10 +295,16 @@
     state.games.clear();
     for (const g of games) state.games.set(g.id, g);
 
-    renderTabs(games);
+    const shown = games.filter(visible);
+    renderTabs(games, window.Whales?.count(games.filter((g) => g.sport !== 'soccer' || !state.hiddenLeagues.has(g.league.slug))));
     renderFilters(d.leagues, d.soccer);
 
-    const shown = games.filter(visible);
+    if (state.sportTab === 'whales' && window.Whales) {
+      window.Whales.view(el.groups, shown, render);
+      renderStatus(d);
+      return;
+    }
+
     const live = shown.filter((g) => groupOf(g) === 'live').sort(bySportThenKick);
     const upcoming = shown.filter((g) => groupOf(g) === 'upcoming').sort(byKick);
     const final = shown.filter((g) => groupOf(g) === 'final').sort(byKick);
@@ -314,6 +321,10 @@
     }
     el.groups.innerHTML = parts.join('');
 
+    renderStatus(d);
+  }
+
+  function renderStatus(d) {
     el.updated.textContent = `Updated ${timeFmt.format(new Date(d.generatedAt))}`;
     if (d.errors?.length) {
       el.banner.textContent = `Some feeds failed: ${d.errors.map((e) => e.league).join(', ')}. Showing what loaded.`;
@@ -1546,6 +1557,7 @@
   el.tabs.addEventListener('click', (e) => {
     const b = e.target.closest('[data-tab]');
     if (!b) return;
+    if (state.sportTab === 'whales' && b.dataset.tab !== 'whales') window.Whales?.stop();
     state.sportTab = b.dataset.tab;
     save('sportTab', state.sportTab);
     render();
