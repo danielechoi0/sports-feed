@@ -157,7 +157,27 @@
     const grp = groupOf(g);
     const score = grp === 'upcoming' ? '' : `, ${x.score ?? 0} to ${y.score ?? 0}`;
     const st = grp === 'live' ? ', live' : grp === 'final' ? ', final' : `, ${isIrregular(g) ? g.status.description : fmtTime(g.date)}`;
-    return `${x.shortName} ${sep} ${y.shortName}${st}${score}`;
+    const sit = possessionText(g);
+    return `${x.shortName} ${sep} ${y.shortName}${st}${score}${sit ? `, ${sit}` : ''}`;
+  }
+
+  // ---------- NFL possession ----------
+  // g.situation is only set for live NFL games; possession can be null
+  // between drives, when ESPN only reports the down (or nothing at all).
+  const hasBall = (g, t) => !!g.situation?.possession && String(g.situation.possession) === String(t.id);
+  const ballMark = (g, t) => (hasBall(g, t) ? `<span class="poss" title="Has the ball" aria-hidden="true"></span>` : '');
+  function downText(g) {
+    const s = g.situation;
+    if (!s?.down) return '';
+    return s.spot ? `${s.down} at ${s.spot}` : s.down;
+  }
+  function possessionText(g) {
+    const t = [g.home, g.away].find((x) => hasBall(g, x));
+    return [t ? `${t.shortName} ball` : '', downText(g)].filter(Boolean).join(', ');
+  }
+  function downHtml(g) {
+    const txt = downText(g);
+    return txt ? `<span class="down${g.situation.redZone ? ' rz' : ''}"${g.situation.redZone ? ' title="Red zone"' : ''}>${esc(txt)}</span>` : '';
   }
 
   function formHtml(last5) {
@@ -190,7 +210,7 @@
   function liveCard(g) {
     const teams = teamsInOrder(g);
     const rows = teams
-      .map((t) => `<div class="trow">${badge(t, 'lg')}<span class="tname">${esc(t.shortName)}</span>${tagHtml(t)}</div>`)
+      .map((t) => `<div class="trow">${badge(t, 'lg')}<span class="tname">${esc(t.shortName)}</span>${tagHtml(t)}${ballMark(g, t)}</div>`)
       .join('');
     const scores = teams.map((t) => `<div class="s">${esc(t.score ?? 0)}</div>`).join('');
     let wx = '';
@@ -203,7 +223,7 @@
       <div class="meta">${metaLine(g)}</div>
       <div class="body"><div class="teams">${rows}</div>
         <div class="tile">${scores}<div class="clock"><span class="dot" aria-hidden="true"></span>${esc(liveClock(g))}</div></div></div>
-      <div class="foot"><span class="venue">${esc(venueText(g))}</span>${wx}</div>
+      <div class="foot">${downHtml(g)}<span class="venue">${esc(venueText(g))}</span>${wx}</div>
     </article>`;
   }
 
@@ -383,13 +403,14 @@
       : 'Live updates connected: scores and clocks are pushed within seconds';
   }
 
-  const liveKey = (g) => JSON.stringify([g.status, g.home.score, g.home.winner, g.home.record, g.away.score, g.away.winner, g.away.record]);
+  const liveKey = (g) => JSON.stringify([g.status, g.situation ?? null, g.home.score, g.home.winner, g.home.record, g.away.score, g.away.winner, g.away.record]);
 
   function applyLive(u) {
     const g = state.games.get(u.id);
     if (!g) return; // not on the day being viewed
     if (liveKey(u) === liveKey(g)) return; // nothing changed (polling returns every live game)
     g.status = u.status;
+    g.situation = u.situation ?? null;
     Object.assign(g.home, u.home);
     Object.assign(g.away, u.away);
     // A game may move between groups (pre -> live -> final), so re-render the list.
@@ -537,6 +558,7 @@
     const sub = [
       statusHtml(g),
       halftimeHtml(g),
+      downHtml(g),
       g.venue.name ? `<span>${esc(venueText(g))}</span>` : '',
       g.broadcast ? `<span>${esc(g.broadcast)}</span>` : '',
       g.odds ? `<span class="spread">${esc(g.odds)}</span>` : '',
@@ -544,9 +566,9 @@
       .filter(Boolean)
       .join('');
     return `<div class="mhead" id="modal-title">
-      <div class="mteam">${img(left.logo, left.name)}<span>${esc(left.name)}</span>${score(left)}</div>
+      <div class="mteam">${img(left.logo, left.name)}<span>${esc(left.name)}</span>${ballMark(g, left)}${score(left)}</div>
       <span class="vs">${sep}</span>
-      <div class="mteam">${score(right)}${img(right.logo, right.name)}<span>${esc(right.name)}</span></div>
+      <div class="mteam">${score(right)}${img(right.logo, right.name)}<span>${esc(right.name)}</span>${ballMark(g, right)}</div>
     </div><div class="msub">${sub}</div>`;
   }
 

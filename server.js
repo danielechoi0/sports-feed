@@ -147,7 +147,7 @@ const liveSnapshot = new Map(); // game id -> serialized live fields
 
 function liveFields(g) {
   const team = (t) => ({ score: t.score, winner: t.winner, record: t.record });
-  return { id: g.id, sport: g.sport, league: g.league.slug, date: g.date, status: g.status, home: team(g.home), away: team(g.away) };
+  return { id: g.id, sport: g.sport, league: g.league.slug, date: g.date, status: g.status, situation: g.situation, home: team(g.home), away: team(g.away) };
 }
 
 function broadcast(event, data) {
@@ -198,6 +198,7 @@ async function refreshLive(date = todayET()) {
           const g = byId.get(fresh.id);
           if (g) {
             g.status = fresh.status;
+            g.situation = fresh.situation;
             for (const side of ['home', 'away']) Object.assign(g[side], fields[side]);
             broadcast('game', fields);
           }
