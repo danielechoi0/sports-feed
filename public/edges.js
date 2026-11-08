@@ -81,7 +81,9 @@
       error = e.message;
     } finally {
       loading = false;
-      if (ctx) ctx.onUpdate();
+      // The date changed while this request was out: fetch the new day now.
+      if (ctx && ctx.date !== date) load();
+      else if (ctx) ctx.onUpdate();
     }
   }
 

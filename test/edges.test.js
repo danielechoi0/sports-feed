@@ -115,8 +115,9 @@ test('The Odds API: event matched by teams and time, outcomes mapped to sides', 
   ];
   const ev = matchOddsApiEvent(events, nfl);
   assert.equal(ev.home_team, 'New England Patriots');
+  ev.bookmakers.push({ key: 'kalshi', title: 'Kalshi', markets: [{ key: 'h2h', outcomes: [{ name: 'Green Bay Packers', price: 2.5 }, { name: 'New England Patriots', price: 1.6 }] }] });
   const qs = oddsApiQuotes(ev, nfl, TWO);
-  assert.equal(qs.length, 1);
+  assert.equal(qs.length, 1); // no-h2h book and the exchange copy are skipped
   near(qs[0].cost.away, 1 / 2.4);
 });
 
@@ -152,4 +153,7 @@ test('Polymarket soccer: one Yes/No market per team plus the draw', () => {
   const { book } = polyBook(e, epl, THREE);
   assert.deepEqual(book, { home: { bid: 0.66, ask: 0.67 }, draw: { bid: 0.18, ask: 0.2 }, away: { bid: 0.14, ask: 0.15 } });
   assert.equal(matchPolyEvent([{ ...e, start: '2026-11-25T12:30:00Z' }], epl), null);
+  // Without a team list both sides of the title must match, in either order.
+  assert.equal(matchPolyEvent([{ ...e, teams: [] }], epl)?.title, e.title);
+  assert.equal(matchPolyEvent([{ ...e, teams: [], title: 'Manchester City FC vs. Arsenal FC' }], epl), null);
 });
