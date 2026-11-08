@@ -32,23 +32,25 @@ test('fillOf prices a fill at the side the taker bought', () => {
   assert.equal(fillOf({ taker_side: 'yes', count_fp: '1', yes_price_dollars: '0.5', created_time: '2026-11-08T16:00:00Z' }), null); // no trade id
 });
 
-test('addFills groups same side + same second into one order', () => {
+test('addFills groups same side + exact same timestamp into one order', () => {
+  const T = '2026-11-08T16:50:52.100437Z'; // one order sweeping two price levels
   const fills = [
-    { id: 1, side: 'yes', count: 1000, yes: 0.5, time: '2026-11-08T16:50:52.100Z' },
-    { id: 2, side: 'yes', count: 2000, yes: 0.51, time: '2026-11-08T16:50:52.100Z', block: true },
-    { id: 3, side: 'no', count: 500, yes: 0.5, time: '2026-11-08T16:50:52.300Z' }, // other side: separate
-    { id: 4, side: 'yes', count: 10, yes: 0.5, time: '2026-11-08T16:50:53.000Z' }, // next second: separate
+    { id: 1, side: 'yes', count: 1000, yes: 0.5, time: T },
+    { id: 2, side: 'yes', count: 2000, yes: 0.51, time: T, block: true },
+    { id: 3, side: 'no', count: 500, yes: 0.5, time: T }, // other side: separate
+    { id: 4, side: 'yes', count: 300, yes: 0.5, time: '2026-11-08T16:50:52.100438Z' }, // 1 µs later, same second: another trader
   ].map((t) => fillOf(trade(t)));
   const orders = addFills(new Map(), fills);
   assert.equal(orders.size, 3);
-  const big = orders.get(`yes|${S52}`);
+  const big = orders.get(`yes|${T}`);
   assert.equal(big.fills, 2);
   assert.equal(big.contracts, 3000);
   near(big.notional, 500 + 1020);
   assert.equal(big.block, true);
-  // Merging later fills into the same second keeps adding to that order.
-  addFills(orders, [fillOf(trade({ id: 5, side: 'yes', count: 100, yes: 0.5, time: '2026-11-08T16:50:52.900Z' }))]);
-  assert.equal(orders.get(`yes|${S52}`).fills, 3);
+  assert.equal(orders.get('yes|2026-11-08T16:50:52.100438Z').fills, 1);
+  // A fill with the same stamp arriving in a later fetch joins the same order.
+  addFills(orders, [fillOf(trade({ id: 5, side: 'yes', count: 100, yes: 0.5, time: T }))]);
+  assert.equal(orders.get(`yes|${T}`).fills, 3);
 });
 
 test('nameMatches handles city names, short forms and accents', () => {
@@ -104,25 +106,26 @@ test('matchEvent ignores events on other dates', () => {
 
 test('mergeTrades: re-fetching the edge second never double counts', () => {
   const b = newBook(0);
+  const T52 = '2026-11-08T16:50:52.100437Z';
   const t1 = trade({ id: 'a', side: 'yes', count: 1000, yes: 0.5, time: '2026-11-08T16:50:51.100Z' });
-  const t2 = trade({ id: 'b', side: 'yes', count: 1000, yes: 0.5, time: '2026-11-08T16:50:52.100Z' });
+  const t2 = trade({ id: 'b', side: 'yes', count: 1000, yes: 0.5, time: T52 });
   mergeTrades(b, [t2, t1], 100);
   assert.equal(b.newestSec, S52);
-  // Next fetch uses min_ts = newestSec, so t2 comes back again with a new fill in that second.
-  const t3 = trade({ id: 'c', side: 'yes', count: 1000, yes: 0.5, time: '2026-11-08T16:50:52.900Z' });
+  // Next fetch uses min_ts = newestSec, so t2 comes back again with a late fill of the same order.
+  const t3 = trade({ id: 'c', side: 'yes', count: 1000, yes: 0.5, time: T52 });
   mergeTrades(b, [t3, t2], 100);
-  const o = b.orders.get(`yes|${S52}`);
+  const o = b.orders.get(`yes|${T52}`);
   assert.equal(o.fills, 2);
   near(o.notional, 1000);
   // The same fetch twice (overlapping requests) changes nothing.
   mergeTrades(b, [t3, t2], 100);
-  assert.equal(b.orders.get(`yes|${S52}`).fills, 2);
+  assert.equal(b.orders.get(`yes|${T52}`).fills, 2);
   // A later second moves the edge; the old edge ids are dropped.
   const t4 = trade({ id: 'd', side: 'no', count: 10, yes: 0.5, time: '2026-11-08T16:50:53.000Z' });
   mergeTrades(b, [t4, t3], 100);
   assert.equal(b.newestSec, S52 + 1);
   assert.deepEqual([...b.edgeIds], ['d']);
-  assert.equal(b.orders.get(`yes|${S52}`).fills, 2); // t3 came back again but was still an edge id
+  assert.equal(b.orders.get(`yes|${T52}`).fills, 2); // t3 came back again but was still an edge id
 });
 
 test('mergeTrades drops small orders except in the newest second', () => {
@@ -132,7 +135,7 @@ test('mergeTrades drops small orders except in the newest second', () => {
     trade({ id: 'b', side: 'yes', count: 10, yes: 0.5, time: '2026-11-08T16:50:52.000Z' }), // $5, newest: kept for now
   ], 100);
   assert.equal(b.orders.size, 1);
-  assert.ok(b.orders.has(`yes|${S52}`));
+  assert.ok(b.orders.has('yes|2026-11-08T16:50:52.000Z'));
 });
 
 test('matchEvent needs both teams on a neighbouring day', () => {

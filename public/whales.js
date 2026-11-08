@@ -169,7 +169,7 @@
     const notes = [
       loading ? `Loading ${games.length - loaded.length} more game${games.length - loaded.length === 1 ? '' : 's'}…` : null,
       orders.length > 400 ? `Showing the ${sortBy === 'size' ? 'largest' : 'newest'} 400; raise the minimum size to see fewer.` : null,
-      'Game-winner markets only. Fills of one order (same side, same second) are combined; size is contracts × the price paid. Trades from 3 h before kickoff.',
+      'Game-winner markets only. Fills with the same side and exact same timestamp are combined into one order (Kalshi does not show who traded); size is contracts × the price paid. Trades from 3 h before kickoff.',
       partial ? 'The busiest markets show only their most recent trades.' : null,
       noMarket.length ? `No Kalshi market: ${noMarket.map((g) => `${g.away.abbrev} @ ${g.home.abbrev}`).join(', ')}.` : null,
       failed.length ? `Couldn't load: ${failed.map((g) => `${g.away.abbrev} @ ${g.home.abbrev}`).join(', ')}.` : null,
