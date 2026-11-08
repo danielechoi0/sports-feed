@@ -31,6 +31,9 @@
   --more-bg: #ffe6cc;
   --less: #1f5fa8;
   --less-bg: #e1ecfa;
+  /* market panel: the two sides of a margin chart (away / home) */
+  --kx-away: #1f5fa8;
+  --kx-home: #b45309;
   --shadow-live: 0 1px 2px rgba(20, 23, 28, 0.05);
   --ui: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --display: "Barlow Condensed", "Arial Narrow", Impact, system-ui, sans-serif;
@@ -67,6 +70,8 @@
     --more-bg: rgba(255, 140, 40, 0.16);
     --less: #8ab8ff;
     --less-bg: rgba(90, 150, 255, 0.16);
+    --kx-away: #8ab8ff;
+    --kx-home: #ffb26b;
     --shadow-live: 0 1px 2px rgba(0, 0, 0, 0.5);
     color-scheme: dark;
   }
@@ -90,6 +95,12 @@
   --good-bg: rgba(61, 220, 132, 0.14);
   --bad-bg: rgba(255, 138, 138, 0.14);
   --warn-bg: rgba(255, 183, 3, 0.14);
+  --more: #ffb26b;
+  --more-bg: rgba(255, 140, 40, 0.16);
+  --less: #8ab8ff;
+  --less-bg: rgba(90, 150, 255, 0.16);
+  --kx-away: #8ab8ff;
+  --kx-home: #ffb26b;
   color-scheme: dark;
 }
 
@@ -716,3 +727,49 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
   .depth .dc-starter { width: auto; }
 }
 /* ==== end NFL depth chart ==== */
+
+/* Market panel: game shape (type grid, margin bar, total range) and lines */
+.kx .kx-shape { display: grid; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); gap: 16px; align-items: start; margin-bottom: 10px; }
+@media (max-width: 720px) { .kx .kx-shape { grid-template-columns: 1fr; } }
+.kx .kx-type-grid { display: grid; grid-template-columns: auto repeat(3, minmax(0, 1fr)); gap: 3px; font-size: 11px; }
+.kx .kx-type-grid .cl { text-align: center; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; padding-bottom: 2px; }
+.kx .kx-type-grid .rl { color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 10px; display: flex; align-items: center; padding-right: 4px; max-width: 64px; line-height: 1.15; }
+.kx .kx-type-grid .cell { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 6px 4px; text-align: center; color: var(--muted); line-height: 1.2; min-height: 40px; display: flex; align-items: center; justify-content: center; }
+.kx .kx-type-grid .cell.on { background: var(--accent); border-color: var(--accent); color: var(--ink-on-form); font-weight: 700; }
+.kx .kx-dist .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin: 2px 0 4px; }
+.kx .kx-dist .k ~ .k { margin-top: 12px; }
+.kx .kx-mbar { display: flex; gap: 2px; height: 18px; }
+.kx .kx-mbar > div { min-width: 2px; }
+.kx .kx-mbar > div:first-child { border-radius: 4px 0 0 4px; }
+.kx .kx-mbar > div:last-child { border-radius: 0 4px 4px 0; }
+.kx .away.strong, .kx .sw.away.strong { background: var(--kx-away); }
+.kx .away, .kx .sw.away { background: color-mix(in srgb, var(--kx-away) 45%, var(--surface)); }
+.kx .mid, .kx .sw.mid { background: color-mix(in srgb, var(--text) 22%, var(--surface)); }
+.kx .home, .kx .sw.home { background: color-mix(in srgb, var(--kx-home) 45%, var(--surface)); }
+.kx .home.strong, .kx .sw.home.strong { background: var(--kx-home); }
+.kx .kx-mleg { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 12px; color: var(--muted); }
+.kx .kx-mleg b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+.kx .kx-mleg .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+.kx .kx-dist .note { margin: 4px 0 0; font-size: 12px; }
+.kx .kx-trange { position: relative; height: 18px; background: var(--surface-2); border-radius: 4px; }
+.kx .kx-trange > div { position: absolute; top: 0; bottom: 0; }
+.kx .kx-trange .b80, .kx .sw.b80 { background: color-mix(in srgb, var(--text) 22%, var(--surface-2)); border-radius: 4px; }
+.kx .kx-trange .b50, .kx .sw.b50 { background: color-mix(in srgb, var(--text) 55%, var(--surface-2)); border-radius: 4px; }
+.kx .kx-trange .med { width: 3px; margin-left: -1.5px; top: -3px; bottom: -3px; background: var(--accent); border: 1px solid var(--bg); border-radius: 2px; }
+.kx .sw.med { background: var(--accent); width: 4px; }
+.kx .kx-trange .mk { width: 0; top: -5px; bottom: -5px; border-left: 2px solid var(--text); margin-left: -1px; }
+.kx .kx-trange .mk.season { border-left-style: dashed; border-left-color: var(--muted); }
+.kx .sw.mk { width: 0; height: 12px; border-radius: 0; border-left: 2px solid var(--text); }
+.kx .sw.mk.season { border-left: 2px dashed var(--muted); }
+.kx .kx-tax { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--muted); margin-top: 2px; }
+.kx .kx-lines td, .kx .kx-lines th { white-space: nowrap; vertical-align: middle; text-align: left; }
+.kx .kx-lines td.lbl { color: var(--muted); text-align: left; }
+.kx .kx-lines .trw { display: flex; align-items: center; gap: 6px; }
+.kx .kx-lines .was { color: var(--muted); text-decoration: line-through; }
+.kx .kx-lines .chg { display: inline-block; margin-left: 6px; font-family: var(--mono); font-size: 11px; color: var(--text); }
+.kx .kx-lines .chg.flat { color: var(--muted); }
+.kx .kx-spark { display: block; overflow: visible; }
+.kx .kx-spark polyline { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.kx .kx-spark circle.hit { fill: transparent; }
+.kx .kx-spark circle.hit:hover { fill: color-mix(in srgb, var(--text) 25%, transparent); }
+.kx .kx-spark circle.end { fill: var(--accent); stroke: var(--bg); stroke-width: 1; }

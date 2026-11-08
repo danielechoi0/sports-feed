@@ -12,6 +12,7 @@ npm start
 
 Then open http://localhost:3000. No dependencies, no API keys. Node 20+.
 `npm run dev` restarts the server on file changes. Set `PORT` to change the port.
+`node --test "test/*.test.js"` runs the tests (market-read math; no network).
 
 ## What it shows
 
@@ -69,14 +70,34 @@ above/below), the game total and each team's implied points vs the season-based
 expectation (team points per game averaged with what the opponent allows; ±3 =
 more/less scoring than usual), and each team's pass share of priced yards (QB
 line vs the listed rushers' lines) vs the same players' season split (±5 points
-= throwing or running more than usual). Spread and win probability use fixed
-cut-offs (lopsided at 9.5+ points or 80%, coin flip within 3).
+= throwing or running more than usual). Close vs lopsided comes from the whole
+spread ladder (below), falling back to fixed cut-offs (lopsided at 9.5+ points
+or 80%, coin flip within 3) when a game has no spread ladder.
 An "at a glance" strip opens the panel: passing yards, rushing yards,
 scoring and field goals, each marked more than normal / normal / less than
 normal for the game (and per team), where normal is the same players' and
 teams' season averages (field goals: made per game, averaged with what the
 opponent allows; Kalshi's field-goal ladders are often barely traded, so that
-tile only reads when the prices are real). The panel shows the headline, a short narrative, key numbers, per-team pass/run
+tile only reads when the prices are real).
+
+*Game shape* reads the whole spread and total ladders, not only their middle:
+the chance of each final margin (7 or fewer, 8–16 or 17+ either way; tight at
+50%+ for 7 or fewer, one-sided at 30%+ for 17+), the favorite's chance of
+winning by exactly 3 or 7 (adjacent Kalshi rungs), and the middle 50% / 80% of
+total-points outcomes. Scoring level (more / normal / less) crossed with the
+margin class names the game on a 3×3 grid ("Back-and-forth shootout", "Tight
+grind", "Favorite in control", ...).
+
+*Lines* compares three views of the game: Kalshi now plus a sparkline of its
+daily line (rebuilt from Kalshi's daily candlesticks with the same ladder math),
+the sportsbook ESPN carries (DraftKings: opening and current spread, total and
+de-vigged moneyline from ESPN's core odds API) and ESPN's matchup predictor. The
+narrative calls out a total that moved 1.5+ points since the open, a spread
+that moved 1+, Kalshi and the sportsbook disagreeing (1.5+ points, 5+ points of
+win probability) and the model 8+ points off the market. Kalshi's 24-hour
+volume and open interest show how much money is behind the lines.
+
+The panel shows the headline, a short narrative, key numbers, per-team pass/run
 tilt bars and every player line by position. Missing markets are named rather
 than filled in, games without markets say so, and in-play prices are flagged.
 It is a hypothesis about what bettors are saying, not advice. Prices are cached
@@ -95,7 +116,12 @@ Soccer league chips filter the soccer section (the choice is remembered).
   A game's Kalshi events share one suffix, e.g. `KXNFLGAME-26NOV08DALIND`
   (Eastern date, away and home codes); it is matched to the ESPN game by date
   and team codes (ESPN `WSH`/`JAX` are Kalshi `WAS`/`JAC`). Player positions
-  come from ESPN team rosters.
+  come from ESPN team rosters. Line history uses Kalshi's event candlesticks
+  (`/series/{series}/events/{event}/candlesticks`, daily, cached 15 minutes).
+- Sportsbook lines and model: ESPN's core odds API
+  (`sports.core.api.espn.com/.../competitions/{id}/odds`, opening and current
+  lines) with the game summary's `pickcenter` as a fallback, and the summary's
+  `predictor` (ESPN matchup predictor).
 - Weather: Open-Meteo forecast at the venue city, hourly, nearest hour to
   kickoff. Venue cities are geocoded once and cached in `.cache/geocode.json`.
 - NFL rankings: built from ESPN box scores of completed games. Each completed
@@ -109,9 +135,11 @@ server.js          HTTP server, /api routes, static files
 lib/espn.js        ESPN fetch helpers and normalizers
 lib/weather.js     Open-Meteo geocoding + forecast
 lib/nflStats.js    NFL offense/defense ranking aggregation
-lib/kalshi.js      Kalshi NFL prices -> implied lines + rule-based market read
+lib/kalshi.js      Kalshi NFL prices -> implied lines, game shape, line history,
+                   sportsbook/model comparison + rule-based market read
 lib/cache.js       in-memory TTL cache, disk cache, concurrency limiter
 public/            index.html, styles.css, app.js (vanilla JS), kalshi.js (market panel)
+test/              node:test tests for the market-read math (no network)
 ```
 
 API routes: `/api/day?date=YYYYMMDD`, `/api/game/{nfl|nba|soccer}/{league}/{id}`,
