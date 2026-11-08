@@ -103,6 +103,21 @@ than filled in, games without markets say so, and in-play prices are flagged.
 It is a hypothesis about what bettors are saying, not advice. Prices are cached
 for three minutes; the panel loads separately from the rest of the modal.
 
+**Edges tab (line gaps).** The game-winner price of every open game on the
+day (NFL, NBA, the soccer leagues; soccer is home / draw / away) from
+sportsbooks, Kalshi and Polymarket side by side, and the gaps worth betting.
+Each venue gives a fair probability (a book's odds with its margin removed
+proportionally; an exchange's bid/ask midpoint, ignored when the spread is over
+8¢) and a cost of $1 payout (1 / decimal odds; the best ask plus the taker fee:
+Kalshi 0.07 × p × (1 − p) per contract, Polymarket's listed fee schedule).
+A venue's EV is the median fair price of the *other* venues divided by its
+cost, minus 1, and needs at least two other venues. The tab lists +EV bets
+above a chosen threshold, any arbitrage (the cheapest price of every outcome
+summing below $1) and each game's full price grid. Live games are off by
+default: venues are read up to 30 s apart and in-play prices move faster, so
+live gaps are usually stale rather than real. It is a screen, not advice: exchange
+prices are the top of the book only.
+
 Use the arrows, the date picker, or the left/right keys to move between days.
 Soccer league chips filter the soccer section (the choice is remembered).
 
@@ -122,6 +137,14 @@ Soccer league chips filter the soccer section (the choice is remembered).
   (`sports.core.api.espn.com/.../competitions/{id}/odds`, opening and current
   lines) with the game summary's `pickcenter` as a fallback, and the summary's
   `predictor` (ESPN matchup predictor).
+- Edges tab: Kalshi game series (`/events?series_ticker=KXNFLGAME&status=open`,
+  best bid/ask per team), Polymarket's public gamma API
+  (`gamma-api.polymarket.com`, no key; series ids looked up from `/sports`,
+  moneyline markets with `bestBid`/`bestAsk` and `feeSchedule`), and
+  sportsbooks: The Odds API (`api.the-odds-api.com`, h2h) when `ODDS_API_KEY`
+  is set (`ODDS_API_REGIONS`, default `us`; quotes cached 10 minutes, one
+  request per league with open games), otherwise the DraftKings moneyline ESPN
+  carries on its scoreboard (pre-game only).
 - Weather: Open-Meteo forecast at the venue city, hourly, nearest hour to
   kickoff. Venue cities are geocoded once and cached in `.cache/geocode.json`.
 - NFL rankings: built from ESPN box scores of completed games. Each completed
@@ -137,13 +160,16 @@ lib/weather.js     Open-Meteo geocoding + forecast
 lib/nflStats.js    NFL offense/defense ranking aggregation
 lib/kalshi.js      Kalshi NFL prices -> implied lines, game shape, line history,
                    sportsbook/model comparison + rule-based market read
+lib/whales.js      large Kalshi trades per game (Whales tab)
+lib/edges.js       game-winner prices across books, Kalshi, Polymarket -> EV, arbitrage
 lib/cache.js       in-memory TTL cache, disk cache, concurrency limiter
-public/            index.html, styles.css, app.js (vanilla JS), kalshi.js (market panel)
+public/            index.html, styles.css, app.js (vanilla JS), kalshi.js (market panel),
+                   whales.js (Whales tab), edges.js (Edges tab)
 test/              node:test tests for the market-read math (no network)
 ```
 
 API routes: `/api/day?date=YYYYMMDD`, `/api/game/{nfl|nba|soccer}/{league}/{id}`,
-`/api/nfl/rankings`, `/api/nfl/{id}/market` (Kalshi market read), `/api/live` (SSE stream), `/api/live-poll?date=YYYYMMDD`
+`/api/nfl/rankings`, `/api/nfl/{id}/market` (Kalshi market read), `/api/edges?date=YYYYMMDD` (line gaps), `/api/live` (SSE stream), `/api/live-poll?date=YYYYMMDD`
 (live fields of in-progress games, for hosts without streaming), `/api/health`.
 `api/index.js` is the Vercel entry point and `vercel.json` the deployment config.
 
@@ -152,7 +178,9 @@ API routes: `/api/day?date=YYYYMMDD`, `/api/game/{nfl|nba|soccer}/{league}/{id}`
 The repo is ready to import as-is: `vercel.json` sets the "Other" preset with
 `public/` as the static output and routes every `/api/*` request to one
 serverless function (`api/index.js`), which reuses the same request handler
-as the local server. No build step and no environment variables are needed.
+as the local server. No build step. One optional environment variable:
+`ODDS_API_KEY` (The Odds API) adds more sportsbooks to the Edges tab; without
+it the tab uses the one book ESPN carries.
 
 1. Import the GitHub repo in the Vercel dashboard (or run `vercel`).
 2. Leave the Build Command empty and the Output Directory as detected.
@@ -242,6 +270,10 @@ in `pipeline/reports/`.
 ## Known limits
 
 - ESPN is an unofficial, undocumented feed; shapes can change without notice.
+- Edges: game winner only (no spreads or totals yet). Without `ODDS_API_KEY`
+  there is one sportsbook, so most EVs are judged against two venues. The
+  Polymarket fee is an estimate from its listed schedule, and The Odds API
+  free tier (500 requests a month) runs out fast if the tab stays open all day.
 - The Kalshi read only sees players Kalshi lists, so rushing totals miss
   unlisted backs; the season split it is compared with uses the same listed
   players to keep it like for like. Season averages are per game played, so a

@@ -828,7 +828,42 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .wh-size span { font-size: 12px; color: var(--muted); }
 .wh-block { color: var(--warn); font-weight: 700; }
 .wh-note { margin: 12px 2px 0; font-size: 12px; color: var(--muted); }
+/* Edges tab (public/edges.js): reuses the Whales layout classes. */
+.ed-h { font-family: var(--display); font-size: 18px; text-transform: uppercase; letter-spacing: 0.02em; margin: 18px 2px 8px; }
+.ed-h small { font-family: var(--mono); font-size: 12px; color: var(--muted); text-transform: none; }
+.ed-row { grid-template-columns: 72px minmax(0, 1.2fr) minmax(0, 1.4fr) auto; }
+.ed-ev { display: flex; flex-direction: column; align-items: flex-start; }
+.ed-ev strong { font-family: var(--mono); font-size: 18px; color: var(--good); }
+.ed-ev span, .ed-when { font-size: 11px; color: var(--muted); text-transform: uppercase; }
+.ed-venue { font-family: var(--mono); font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 6px; background: var(--surface-2); color: var(--text); white-space: nowrap; }
+.ed-venue.exchange { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.ed-arb { background: var(--surface); border: 1px solid var(--good); border-radius: 12px; padding: 10px 14px; cursor: pointer; }
+.ed-arb ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.ed-arb li { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ed-arb li img { width: 18px; height: 18px; object-fit: contain; }
+.ed-arb-m { margin-left: auto; font-family: var(--mono); color: var(--good); }
+.ed-games { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr)); gap: 10px; }
+.ed-game { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; cursor: pointer; min-width: 0; }
+.ed-game:hover, .ed-game:focus-visible, .ed-arb:hover, .ed-arb:focus-visible { border-color: var(--text); outline: none; }
+@media (min-width: 760px) { .ed-game.three { grid-column: span 2; } }
+.ed-gap { margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.ed-gap.wide { color: var(--warn); font-weight: 700; }
+.ed-scroll { overflow-x: auto; margin-top: 8px; }
+.ed-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ed-table th, .ed-table td { padding: 5px 6px; text-align: right; border-top: 1px solid var(--border); white-space: nowrap; }
+.ed-table thead th { border-top: 0; font-size: 12px; color: var(--muted); font-weight: 600; }
+.ed-table thead th img { width: 16px; height: 16px; object-fit: contain; vertical-align: -3px; margin-right: 4px; }
+.ed-table th[scope="row"] { text-align: left; }
+.ed-table td b { font-family: var(--mono); display: block; }
+.ed-table td span { font-size: 11px; color: var(--muted); }
+.ed-table td.best b { text-decoration: underline; text-underline-offset: 3px; }
+.ed-table td.hot { background: var(--good-bg); }
+.ed-table td.hot b { color: var(--good); }
+.ed-table .ed-na { color: var(--muted); }
+.ed-cons th, .ed-cons td { border-top: 1px dashed var(--border); }
 @media (max-width: 720px) {
+  .ed-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .ed-row .ed-ev { grid-column: 1 / -1; flex-direction: row; gap: 6px; align-items: baseline; }
   .wh-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .wh-row { grid-template-columns: minmax(0, 1fr) auto; }
   .wh-time { grid-column: 1 / -1; }

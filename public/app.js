@@ -21,7 +21,7 @@
     tickTimer: null,
     halftimeAt: new Map(), // soccer game id -> halftime whistle ISO (from detail)
   };
-  if (!['all', 'nfl', 'nba', 'soccer', 'whales'].includes(state.sportTab)) state.sportTab = 'all';
+  if (!['all', 'nfl', 'nba', 'soccer', 'whales', 'edges'].includes(state.sportTab)) state.sportTab = 'all';
 
   const $ = (sel, root = document) => root.querySelector(sel);
   const el = {
@@ -278,16 +278,16 @@
     return d ? [...d.nfl, ...d.nba, ...d.soccer] : [];
   }
   function visible(g) {
-    // The Whales tab is a view of every sport, not a sport filter.
-    if (state.sportTab !== 'all' && state.sportTab !== 'whales' && g.sport !== state.sportTab) return false;
+    // The Whales and Edges tabs are views of every sport, not sport filters.
+    if (!['all', 'whales', 'edges'].includes(state.sportTab) && g.sport !== state.sportTab) return false;
     if (g.sport === 'soccer' && state.hiddenLeagues.has(g.league.slug)) return false;
     return true;
   }
 
-  function renderTabs(games, whaleCount) {
-    const counts = { all: games.length, nfl: 0, nba: 0, soccer: 0, whales: whaleCount ?? '' };
+  function renderTabs(games, whaleCount, edgeCount) {
+    const counts = { all: games.length, nfl: 0, nba: 0, soccer: 0, whales: whaleCount ?? '', edges: edgeCount ?? '' };
     for (const g of games) counts[g.sport]++;
-    const labels = { all: 'All', nfl: 'NFL', nba: 'NBA', soccer: 'Soccer', whales: 'Whales' };
+    const labels = { all: 'All', nfl: 'NFL', nba: 'NBA', soccer: 'Soccer', whales: 'Whales', edges: 'Edges' };
     el.tabs.innerHTML = Object.keys(labels)
       .map((k) => `<button class="tab" data-tab="${k}" aria-pressed="${state.sportTab === k}">${labels[k]}<span class="n">${counts[k]}</span></button>`)
       .join('');
@@ -316,11 +316,17 @@
     for (const g of games) state.games.set(g.id, g);
 
     const shown = games.filter(visible);
-    renderTabs(games, window.Whales?.count(games.filter((g) => g.sport !== 'soccer' || !state.hiddenLeagues.has(g.league.slug))));
+    const leagueShown = games.filter((g) => g.sport !== 'soccer' || !state.hiddenLeagues.has(g.league.slug));
+    renderTabs(games, window.Whales?.count(leagueShown), window.Edges?.count(leagueShown, state.date));
     renderFilters(d.leagues, d.soccer);
 
     if (state.sportTab === 'whales' && window.Whales) {
       window.Whales.view(el.groups, shown, render);
+      renderStatus(d);
+      return;
+    }
+    if (state.sportTab === 'edges' && window.Edges) {
+      window.Edges.view(el.groups, shown, render, state.date);
       renderStatus(d);
       return;
     }
@@ -1580,6 +1586,7 @@
     const b = e.target.closest('[data-tab]');
     if (!b) return;
     if (state.sportTab === 'whales' && b.dataset.tab !== 'whales') window.Whales?.stop();
+    if (state.sportTab === 'edges' && b.dataset.tab !== 'edges') window.Edges?.stop();
     state.sportTab = b.dataset.tab;
     save('sportTab', state.sportTab);
     render();

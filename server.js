@@ -29,6 +29,7 @@ import { buildShotModel } from './lib/shotModel.js';
 import { getRankings, warmRankings } from './lib/nflStats.js';
 import { nflMarket } from './lib/kalshi.js';
 import { gameWhales } from './lib/whales.js';
+import { dayEdges } from './lib/edges.js';
 import { cached, pLimit, cacheStats } from './lib/cache.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -418,6 +419,16 @@ export async function handle(req, res) {
     if (sport === 'soccer') soccerPath(league); // validates the league
     else if (league !== sport) return sendJson(res, 404, { error: 'not found' });
     const data = await cached(`whales:${sport}:${league}:${id}`, 30_000, () => gameWhales(sport, league, id));
+    return sendJson(res, 200, data);
+  }
+  if (pathname === '/api/edges') {
+    // Game-winner prices across sportsbooks, Kalshi and Polymarket (lib/edges.js).
+    const date = url.searchParams.get('date') || todayET();
+    if (!/^\d{8}$/.test(date)) return sendJson(res, 400, { error: 'date must be YYYYMMDD' });
+    const data = await cached(`edges:${date}`, 20_000, async () => {
+      const day = await cached(`day:${date}`, 45_000, () => buildDay(date));
+      return dayEdges(date, allGames(day));
+    });
     return sendJson(res, 200, data);
   }
   if (pathname === '/api/live') {
