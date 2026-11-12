@@ -8,6 +8,7 @@
 - Edges tab: lib/edges.js, /api/edges?date=, public/edges.js, test/edges.test.js; game-winner prices from books (Odds API or ESPN DK), Kalshi, Polymarket -> leave-one-out EV + arbitrage. 2026-11-08: 13 pre-game games priced on 3 venues, best +2.1%
 
 - NBA modal: jersey numbers in the box score (# column) and injury list; rosters and DNP list already had them
+- NBA live box score: the five on the floor first (ESPN boxscore `active` flag), falls back to starters unless exactly five are flagged; unverified against a live payload (ESPN blocked in sandbox)
 ## In progress
 -
 

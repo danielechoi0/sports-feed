@@ -1,7 +1,7 @@
 // NFL live situation (possession, down & distance) from scoreboard events. No network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { nflSituation, normalizeEvent } from '../lib/espn.js';
+import { nbaBoxLineups, nflSituation, normalizeEvent } from '../lib/espn.js';
 
 const league = { slug: 'nfl', name: 'NFL', short: 'NFL' };
 const event = (state, situation, sport = 'nfl', name = 'STATUS_IN_PROGRESS') =>
@@ -53,4 +53,22 @@ test('normalizeEvent sets situation only for live NFL games', () => {
 test('normalizeEvent hides the stale down at halftime and between quarters', () => {
   assert.equal(event('in', LIVE, 'nfl', 'STATUS_HALFTIME').situation, null);
   assert.equal(event('in', LIVE, 'nfl', 'STATUS_END_PERIOD').situation, null);
+});
+
+test('nbaBoxLineups marks players ESPN flags active as on court', () => {
+  const ath = (id, starter, active) => ({ athlete: { id, displayName: `P${id}`, jersey: id }, starter, active, stats: ['30', '10'] });
+  const sum = {
+    boxscore: {
+      players: [
+        {
+          team: { id: '1', displayName: 'A' },
+          statistics: [{ keys: ['minutes', 'points'], labels: ['MIN', 'PTS'], athletes: [ath('1', true, true), ath('2', true, false), ath('6', false, true), ath('7', false)] }],
+        },
+      ],
+    },
+  };
+  const [t] = nbaBoxLineups(sum);
+  assert.deepEqual(t.starters.map((p) => p.onCourt), [true, false]);
+  assert.deepEqual(t.bench.map((p) => p.onCourt), [true, false]);
+  assert.equal(t.starters[0].jersey, '1');
 });

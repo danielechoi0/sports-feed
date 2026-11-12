@@ -1547,8 +1547,12 @@
         if (!l) continue;
         const bench = l.bench.filter((p) => !p.dnp);
         const dnp = l.bench.filter((p) => p.dnp);
-        const rows = [...l.starters.map((p) => ({ ...p, cls: 'starter' })), ...bench.map((p) => ({ ...p, cls: 'sub' }))];
-        parts.push(`<div class="panel full"><h3>${img(t.logo, t.name)} ${esc(t.name)} <span class="right">box score · starters then bench</span></h3>
+        let rows = [...l.starters.map((p) => ({ ...p, cls: 'starter' })), ...bench.map((p) => ({ ...p, cls: 'sub' }))];
+        // Live: lead with the five on the floor, if ESPN marks exactly five.
+        const onCourt = g.status.state === 'in' ? rows.filter((p) => p.onCourt) : [];
+        const live = onCourt.length === 5;
+        if (live) rows = [...onCourt.map((p, i) => ({ ...p, cls: `starter${i === 4 ? ' split' : ''}` })), ...rows.filter((p) => !p.onCourt).map((p) => ({ ...p, cls: 'sub' }))];
+        parts.push(`<div class="panel full"><h3>${img(t.logo, t.name)} ${esc(t.name)} <span class="right">box score · ${live ? 'on court then bench' : 'starters then bench'}</span></h3>
           ${boxTable(l.labels, rows, { keep, descriptions: l.descriptions, num: true })}
           ${dnp.length ? `<details><summary>Did not play (${dnp.length})</summary><ul class="plist">${dnp.map((p) => nbaPlayerLi(p, { sub: true })).join('')}</ul></details>` : ''}
         </div>`);

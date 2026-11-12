@@ -500,6 +500,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .box td:not(.hi):not(.pname):not(.pos):not(.num) { color: var(--muted); }
 .box tr.starter td.pname { font-weight: 600; }
 .box tr.sub td { color: var(--muted); }
+.box tr.split td { border-bottom: 2px solid var(--border); }
 .cardi { display: inline-block; width: 8px; height: 11px; border-radius: 2px; margin-left: 6px; vertical-align: -1px; }
 .cardi.yc { background: var(--draw); }
 .cardi.rc { background: #e53935; }
