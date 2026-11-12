@@ -708,7 +708,7 @@
   }
 
   // Generic box-score table: labels + rows of {name, pos, jersey, stats[]}.
-  function boxTable(labels, rows, { keep = null, sortBy = null, limit = null, descriptions = [] } = {}) {
+  function boxTable(labels, rows, { keep = null, sortBy = null, limit = null, descriptions = [], num = false } = {}) {
     let cols = labels.map((l, i) => ({ l, i, d: descriptions[i] || '' }));
     if (keep) cols = cols.filter((c) => keep.includes(c.l));
     let list = rows;
@@ -717,8 +717,8 @@
       if (si >= 0) list = [...rows].sort((x, y) => (parseFloat(y.stats[si]) || 0) - (parseFloat(x.stats[si]) || 0));
     }
     if (limit) list = list.slice(0, limit);
-    return `<div class="scroll"><table class="box"><thead><tr><th>Player</th>${cols.map((c) => `<th title="${esc(c.d)}">${esc(c.l)}</th>`).join('')}</tr></thead><tbody>${list
-      .map((r) => `<tr class="${r.cls || ''}${r.ejected ? ' off' : ''}"><td class="pname">${esc(r.name)}${r.pos ? `<span class="pos">${esc(r.pos)}</span>` : ''}${r.ejected ? '<span class="flag sentoff" title="Ejected from the game">ejected</span>' : ''}</td>${cols.map((c) => `<td>${esc(r.stats[c.i] ?? '')}</td>`).join('')}</tr>`)
+    return `<div class="scroll"><table class="box"><thead><tr>${num ? '<th class="num" title="Jersey number">#</th>' : ''}<th>Player</th>${cols.map((c) => `<th title="${esc(c.d)}">${esc(c.l)}</th>`).join('')}</tr></thead><tbody>${list
+      .map((r) => `<tr class="${r.cls || ''}${r.ejected ? ' off' : ''}">${num ? `<td class="num">${esc(r.jersey || '')}</td>` : ''}<td class="pname">${esc(r.name)}${r.pos ? `<span class="pos">${esc(r.pos)}</span>` : ''}${r.ejected ? '<span class="flag sentoff" title="Ejected from the game">ejected</span>' : ''}</td>${cols.map((c) => `<td>${esc(r.stats[c.i] ?? '')}</td>`).join('')}</tr>`)
       .join('')}</tbody></table></div>`;
   }
 
@@ -1419,12 +1419,12 @@
     return 'st-other';
   }
 
-  function injuryList(team, list) {
+  function injuryList(team, list, { num = false } = {}) {
     const items = list?.length
       ? `<ul class="inj">${list
           .map((i) => {
             const why = [i.type, i.side, i.returnDate && i.status !== 'Out' ? `return ${fmtShort(i.returnDate)}` : null].filter(Boolean).join(' · ');
-            return `<li><span class="who">${esc(i.name)}<span class="pos">${esc(i.pos || '')}</span>${why ? `<span class="why">${esc(why)}</span>` : ''}</span><span class="st ${statusClass(i.status)}">${esc(i.status || '')}</span></li>`;
+            return `<li><span class="who">${num && i.jersey ? `<span class="num">${esc(i.jersey)}</span>` : ''}${esc(i.name)}<span class="pos">${esc(i.pos || '')}</span>${why ? `<span class="why">${esc(why)}</span>` : ''}</span><span class="st ${statusClass(i.status)}">${esc(i.status || '')}</span></li>`;
           })
           .join('')}</ul>`
       : '<p class="note" style="margin:0">No players listed.</p>';
@@ -1549,7 +1549,7 @@
         const dnp = l.bench.filter((p) => p.dnp);
         const rows = [...l.starters.map((p) => ({ ...p, cls: 'starter' })), ...bench.map((p) => ({ ...p, cls: 'sub' }))];
         parts.push(`<div class="panel full"><h3>${img(t.logo, t.name)} ${esc(t.name)} <span class="right">box score · starters then bench</span></h3>
-          ${boxTable(l.labels, rows, { keep, descriptions: l.descriptions })}
+          ${boxTable(l.labels, rows, { keep, descriptions: l.descriptions, num: true })}
           ${dnp.length ? `<details><summary>Did not play (${dnp.length})</summary><ul class="plist">${dnp.map((p) => nbaPlayerLi(p, { sub: true })).join('')}</ul></details>` : ''}
         </div>`);
       }
@@ -1564,7 +1564,7 @@
     }
     for (const t of teams) {
       const inj = d.injuries?.find((x) => String(x.team.id) === String(t.id));
-      if (inj?.list?.length) parts.push(injuryList(t, inj.list));
+      if (inj?.list?.length) parts.push(injuryList(t, inj.list, { num: true }));
     }
     return `<div class="mgrid">${parts.join('')}</div>`;
   }

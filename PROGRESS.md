@@ -7,6 +7,7 @@
 - NFL live possession: football marker by the team with the ball + down & distance on live cards and the game modal, pushed with live updates (test/espn.test.js)
 - Edges tab: lib/edges.js, /api/edges?date=, public/edges.js, test/edges.test.js; game-winner prices from books (Odds API or ESPN DK), Kalshi, Polymarket -> leave-one-out EV + arbitrage. 2026-11-08: 13 pre-game games priced on 3 venues, best +2.1%
 
+- NBA modal: jersey numbers in the box score (# column) and injury list; rosters and DNP list already had them
 ## In progress
 -
 

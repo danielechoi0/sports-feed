@@ -493,6 +493,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .box td { padding: 4px 6px; text-align: right; white-space: nowrap; border-top: 1px solid var(--border); }
 .box td.pname { text-align: left; max-width: 180px; overflow: hidden; text-overflow: ellipsis; font-family: var(--ui); }
 .box td.num { color: var(--muted); font-size: 12px; width: 26px; }
+.box th.num { text-align: right; }
 .box td.pos { color: var(--muted); font-size: 11px; font-weight: 700; text-align: left; }
 .box .pname .pos { font-family: var(--mono); font-size: 11px; color: var(--muted); font-weight: 700; margin-left: 5px; }
 .box td.hi { font-weight: 700; color: var(--text); }
@@ -530,6 +531,7 @@ details summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-
 .inj { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .inj li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; font-size: 14px; }
 .inj .who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.inj .who .num { color: var(--muted); font-size: 12px; margin-right: 6px; }
 .inj .who .pos { font-family: var(--mono); color: var(--muted); font-size: 12px; margin-left: 4px; }
 .inj .why { color: var(--muted); font-size: 12px; display: block; }
 .st { font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
